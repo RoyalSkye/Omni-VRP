@@ -13,9 +13,10 @@ def generate_GM_tsp_data_grid(dataset_size, graph_size, num_modes=-1, low=0, hig
     sc: propto stdev of modes arounf the perfect grid; sc1: stdev at each mode.
     Code from "On the Generalization of Neural Combinatorial Optimization Heuristics".
     """
+    import scipy
     from numpy.random import default_rng
     from numpy import meshgrid, array
-    print("num modes ", num_modes)
+    # print("num modes ", num_modes)
     dataset = []
 
     for i in range(dataset_size):
@@ -56,7 +57,7 @@ def generate_GM_tsp_data_grid(dataset_size, graph_size, num_modes=-1, low=0, hig
         data = data.reshape(graph_size, 2)
         dataset.append(data)
 
-    print(num_modes, " dataset ", dataset[0])
+    # print(num_modes, " dataset ", dataset[0])
 
     return dataset
 
@@ -161,7 +162,6 @@ class TSPDataset(Dataset):
                 data = pickle.load(f)
                 self.data = [torch.FloatTensor(row) for row in (data[offset:offset+num_samples])]
         else:
-            # self.data = [torch.FloatTensor(size, 2).uniform_(0, 1) for i in range(num_samples)]  # Sample points randomly in [0, 1] square
             if task['variation_type'] == 'size':
                 self.data = generate_uniform_tsp_data(num_samples, task['graph_size'], task['low'], task['high'])
             if task['variation_type'] == 'scale':
@@ -170,6 +170,8 @@ class TSPDataset(Dataset):
                 self.data = generate_GM_tsp_data_grid(num_samples, task['graph_size'], task['num_modes'])
             if task['variation_type'] == 'mix_dist_size':
                 self.data = generate_GM_tsp_data_grid(num_samples, task['graph_size'], task['num_modes'])
+            else:
+                self.data = [torch.FloatTensor(size, 2).uniform_(0, 1) for i in range(num_samples)]  # Sample points randomly in [0, 1] square
 
         self.size = len(self.data)
 

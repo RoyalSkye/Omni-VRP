@@ -22,7 +22,7 @@ def save_checkpoint(model, path):
     model = model.module if isinstance(model, DataParallel) else model
     torch.save(
         {
-            'model': get_inner_model(model).state_dict(),
+            'model': model.state_dict(),
             'rng_state': torch.get_rng_state(),
             'cuda_rng_state': torch.cuda.get_rng_state_all(),
         },

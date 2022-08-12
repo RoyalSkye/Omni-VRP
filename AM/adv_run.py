@@ -81,6 +81,7 @@ def run(opts):
 
     # generate tasks based on task distribution.
     tasks_list = []
+    """
     if opts.variation_type == 'size':
         graph_sizes = [10, 20, 30, 50]
         if opts.problem == "tsp":
@@ -120,6 +121,10 @@ def run(opts):
     else:
         print("Invalid task distribution: opts.variation_type!")
         exit(0)
+    """
+    for i in range(3):
+        task_prop = {'graph_size': opts.graph_size, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': 'none'}
+        tasks_list.append(task_prop)
 
     baseline_dict, val_dict = {}, {}
     print("Task list: {}".format(tasks_list))
@@ -139,7 +144,7 @@ def run(opts):
         for index_task, task in enumerate(tasks_list):
             baseline = baseline_dict[str(task)]
             val_dataset = val_dict[str(task)]
-            train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, opts, alpha, task)
+            train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, opts, alpha, task, adv=True)
 
         alpha = alpha * opts.alpha_decay
 

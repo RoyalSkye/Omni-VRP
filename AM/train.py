@@ -1,11 +1,13 @@
 import os
 import copy
 import time
+import random
 from tqdm import tqdm
 import torch
 import math
 import pickle
 from datetime import datetime
+import numpy as np
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -80,6 +82,40 @@ def clip_grad_norms(param_groups, max_norm=math.inf):
     ]
     grad_norms_clipped = [min(g_norm, max_norm) for g_norm in grad_norms] if max_norm > 0 else grad_norms
     return grad_norms, grad_norms_clipped
+
+
+def get_hard_samples(model, data, eps=5, batch_size=1024, baseline=None):
+    from torch.autograd import Variable
+    model.eval()
+    set_decode_type(model, "greedy")
+
+    def minmax(xy_):
+        '''
+        min max batch of graphs [b,n,2]
+        '''
+        xy_ = (xy_ - xy_.min(dim=1, keepdims=True)[0]) / (xy_.max(dim=1, keepdims=True)[0] - xy_.min(dim=1, keepdims=True)[0])
+        return xy_
+
+    def get_hard(model, data, eps):
+        data.requires_grad_()
+        cost, ll, pi = model(data, return_pi=True)
+        if baseline is not None:
+            with torch.no_grad():
+                cost_b, _ = baseline.eval(data, None)  # only support for rollout now.
+            # cost, ll = model(data)
+            delta = torch.autograd.grad(eps*((cost/cost_b)*ll).mean(), data)[0]
+        else:
+            # As dividend is viewed as constant, it can be omitted in gradient calculation.
+            delta = torch.autograd.grad(eps*(cost*ll).mean(), data)[0]
+        ndata = data.detach() + delta
+        ndata = minmax(ndata)
+        ndata = Variable(ndata, requires_grad=False)
+        return ndata
+
+    # dataloader = DataLoader(data, batch_size=batch_size)
+    # hard = torch.cat([get_hard(model, data, eps) for data in dataloader], dim=0)
+    # return hard
+    return get_hard(model, data, eps)
 
 
 def tune_and_test(task, model_meta, baseline, epoch, test_dataset, problem, tb_logger, opts, fine_tuning_dataset=None, dict_results_task_sample_iter_wise=None):
@@ -170,7 +206,7 @@ def tune_and_test(task, model_meta, baseline, epoch, test_dataset, problem, tb_l
     return updated_reward
 
 
-def train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, opts, alpha, task):
+def train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, opts, alpha, task, adv=False):
     lr = opts.lr_model * (opts.lr_decay ** epoch)
     print("Start train epoch {}, lr={}, alpha={} on task {}".format(epoch, lr, alpha, task))
     step = 0
@@ -188,7 +224,7 @@ def train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, op
     optimizer = optim.Adam(model_meta.parameters(), lr=lr)
 
     for batch_id, batch in enumerate(tqdm(training_dataloader, disable=opts.no_progress_bar)):
-        train_batch(model_meta, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts)
+        train_batch(model_meta, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts, adv)
         step += 1
 
     candidate_weights = model_meta.state_dict()
@@ -205,12 +241,20 @@ def train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, op
     print("Finished epoch {}, took {} s".format(epoch, time.strftime('%H:%M:%S', time.gmtime(epoch_duration))))
 
 
-def train_batch(model, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts):
+def train_batch(model, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts, adv=False):
     x, bl_val = baseline.unwrap_batch(batch)
     x = move_to(x, opts.device)
     bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
 
+    if adv:
+        epsilon = random.sample(np.arange(0, 50, 0.1).tolist(), 1)[0]
+        x = get_hard_samples(model, x, epsilon, batch_size=x.size(0), baseline=baseline)
+        if bl_val is not None:
+            bl_val, _ = baseline.eval(x, None)
+
     # Evaluate model, get costs and log probabilities
+    model.train()
+    set_decode_type(model, "sampling")
     cost, log_likelihood = model(x)
 
     # Evaluate baseline, get baseline loss if any (only for critic)
