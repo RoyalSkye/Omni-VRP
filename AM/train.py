@@ -1,13 +1,11 @@
 import os
 import copy
 import time
-import random
 from tqdm import tqdm
 import torch
 import math
 import pickle
 from datetime import datetime
-import numpy as np
 
 import torch.optim as optim
 from torch.utils.data import DataLoader
@@ -175,20 +173,20 @@ def tune_and_test(task, model_meta, baseline, epoch, test_dataset, problem, tb_l
             time_taken_for_update = (time_after_update - time_before_update).total_seconds() / 60.0
             time_spent_in_fine_tuning += time_taken_for_update
             step += 1
-            if COUNTER_FINE_TUNE % 10 == 0 or COUNTER_FINE_TUNE == 1:
-                updated_reward, updated_all_costs = validate(model_task, test_dataset, opts, return_all_costs=True, return_pi=False)
-                print(" COST AFTER TUNING ", updated_reward)
-                sequence_updated_reward.append(updated_reward)
-                if dict_results_task_sample_iter_wise is not None:
-                    dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE] = {}
-                    dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE]['cost'] = updated_all_costs
-                    # dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE]['pi'] = None
-                    dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE]['current_time'] = datetime.now()
-                    dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE]['time_spent_in_fine_tuning'] = time_spent_in_fine_tuning
-                    dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE]['avg_cost'] = updated_reward.item()
-
             COUNTER_FINE_TUNE += 1
             print(">> Time spent in fine-tuning {} minutes, {} steps".format(time_spent_in_fine_tuning, COUNTER_FINE_TUNE))
+
+        # if COUNTER_FINE_TUNE % 10 == 0 or COUNTER_FINE_TUNE == 1:
+        updated_reward, updated_all_costs = validate(model_task, test_dataset, opts, return_all_costs=True, return_pi=False)
+        print(" COST AFTER TUNING ", updated_reward)
+        sequence_updated_reward.append(updated_reward)
+        # if dict_results_task_sample_iter_wise is not None:
+        dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE] = {}
+        dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE]['cost'] = updated_all_costs
+        # dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE]['pi'] = None
+        dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE]['current_time'] = datetime.now()
+        dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE]['time_spent_in_fine_tuning'] = time_spent_in_fine_tuning
+        dict_results_task_sample_iter_wise[COUNTER_FINE_TUNE]['avg_cost'] = updated_reward.item()
 
     epoch_duration = time.time() - start_time
     updated_reward = validate(model_task, test_dataset, opts, return_all_costs=False, return_pi=False)
@@ -196,17 +194,54 @@ def tune_and_test(task, model_meta, baseline, epoch, test_dataset, problem, tb_l
     if num_fine_tune_step_epochs == 0:
         print("****** No fine tuning done **** ")
     else:
-        print(">> {} steps fine-tuning finished, took {} s".format(COUNTER_FINE_TUNE, time.strftime('%H:%M:%S', time.gmtime(epoch_duration))))
+        print(">> {} steps within {} epochs fine-tuning finished, took {} s".format(COUNTER_FINE_TUNE, num_fine_tune_step_epochs, time.strftime('%H:%M:%S', time.gmtime(epoch_duration))))
         print(">> AFTER TUNING on task ", task)
         print(">> COST AFTER TUNING ", updated_reward)
 
     for index, x in enumerate(sequence_updated_reward):
         print(x.item(), end=' -> ')
+    print("")
 
     return updated_reward
 
 
-def train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, opts, alpha, task, adv=False):
+def train_epoch(model, optimizer, baseline, lr_scheduler, epoch, val_dataset, problem, tb_logger, opts, task, eps=0):
+    """
+        Implementation of ordinary AM training (update by batch).
+    """
+    print("Start train epoch {}, lr={} on task {}".format(epoch, optimizer.param_groups[0]['lr'], task))
+    step = 0
+    start_time = time.time()
+
+    # Generate new training data for each epoch
+    epoch_size = opts.batch_size * opts.k_tune_steps
+    training_dataset = baseline.wrap_dataset(problem.make_dataset(num_samples=epoch_size, distribution=opts.data_distribution, task=task))
+    training_dataloader = DataLoader(training_dataset, batch_size=opts.batch_size, num_workers=1)
+
+    # Put model in train mode!
+    model.train()
+    set_decode_type(model, "sampling")
+
+    for batch_id, batch in enumerate(tqdm(training_dataloader, disable=opts.no_progress_bar)):
+        train_batch(model, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts, eps=eps)
+        step += 1
+
+    # update baseline model
+    if epoch % opts.baseline_every_Xepochs_for_META == 0:
+        # avg_reward = validate(model, val_dataset, opts)
+        baseline.epoch_callback(model, epoch)
+
+    # lr_scheduler should be called at end of epoch
+    lr_scheduler.step()
+
+    epoch_duration = time.time() - start_time
+    print("Finished epoch {}, took {} s".format(epoch, time.strftime('%H:%M:%S', time.gmtime(epoch_duration))))
+
+
+def meta_train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, opts, alpha, task, eps=0):
+    """
+        Implementation for meta-learning framework.
+    """
     lr = opts.lr_model * (opts.lr_decay ** epoch)
     print("Start train epoch {}, lr={}, alpha={} on task {}".format(epoch, lr, alpha, task))
     step = 0
@@ -224,7 +259,7 @@ def train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, op
     optimizer = optim.Adam(model_meta.parameters(), lr=lr)
 
     for batch_id, batch in enumerate(tqdm(training_dataloader, disable=opts.no_progress_bar)):
-        train_batch(model_meta, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts, adv)
+        train_batch(model_meta, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts, eps=eps)
         step += 1
 
     candidate_weights = model_meta.state_dict()
@@ -241,14 +276,13 @@ def train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, op
     print("Finished epoch {}, took {} s".format(epoch, time.strftime('%H:%M:%S', time.gmtime(epoch_duration))))
 
 
-def train_batch(model, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts, adv=False):
+def train_batch(model, optimizer, baseline, epoch, batch_id, step, batch, tb_logger, opts, eps=0):
     x, bl_val = baseline.unwrap_batch(batch)
     x = move_to(x, opts.device)
     bl_val = move_to(bl_val, opts.device) if bl_val is not None else None
 
-    if adv:
-        epsilon = random.sample(np.arange(0, 50, 0.1).tolist(), 1)[0]
-        x = get_hard_samples(model, x, epsilon, batch_size=x.size(0), baseline=baseline)
+    if eps > 0:
+        x = get_hard_samples(model, x, eps, batch_size=x.size(0), baseline=baseline)
         if bl_val is not None:
             bl_val, _ = baseline.eval(x, None)
 

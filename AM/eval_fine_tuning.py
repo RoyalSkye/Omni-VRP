@@ -14,6 +14,7 @@ from nets.attention_model import AttentionModel
 from nets.pointer_network import PointerNetwork, CriticNetworkLSTM
 from utils import torch_load_cpu, load_problem, seed_everything
 from train import clip_grad_norms, tune_and_test
+from generate_dataset import generate_test_task
 import copy
 import pickle
 import os
@@ -21,8 +22,10 @@ import os
 
 def run(opts):
     # hard-coded
-    opts.load_path = "./pretrained/tsp/SIZE/META_10_20_30_50/epoch-99.pt"
-    opts.variation_type = "size"
+    opts.graph_size = 40  # for variation_type == size
+    opts.load_path = "/data/yxwu/jianan/generalization-NCO/AM/outputs/tsp_40/run_20220812T202208/epoch-1000.pt"
+    opts.variation_type = "dist"
+    opts.test_result_pickle_file = os.path.split(opts.load_path)[-1]
 
     tune_sequence = []
     epoch = 99999
@@ -77,45 +80,7 @@ def run(opts):
     model_ = get_inner_model(model_meta)
     model_.load_state_dict({**model_.state_dict(), **load_data.get('model', {})})
 
-    tasks_list = []
-    if opts.variation_type == 'size':
-        graph_sizes = [80, 100, 120, 150]
-        for g_sizes in graph_sizes:
-            task_prop = {'graph_size': g_sizes, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': opts.variation_type}
-            task_prop['test_dataset'] = "{}{}_{}_seed{}.pkl".format(opts.problem, task_prop['graph_size'], "test", "1234")
-            task_prop['fine_tuning_dataset'] = "{}{}_{}_seed{}.pkl".format(opts.problem, task_prop['graph_size'], "fine_tuning", "9999")
-            tasks_list.append(task_prop)
-    elif opts.variation_type == 'scale':
-        scales = [[0.0, 3.0], [0.0, 5.0], [0.0, 8.0], [0.0, 10.0]]
-        for scale in scales:
-            task_prop = {'graph_size': opts.graph_size, 'low': scale[0], 'high': scale[1], 'dist': 'uniform', 'variation_type': opts.variation_type}
-            task_prop['test_dataset'] = "{}__size_{}_scale_{}_{}_{}_seed{}.pkl".format(opts.problem,task_prop['graph_size'], task_prop['low'], task_prop['high'], "test", "1234")
-            task_prop['fine_tuning_dataset'] = "{}__size_{}_scale_{}_{}_{}_seed{}.pkl".format(opts.problem, task_prop['graph_size'], task_prop['low'], task_prop['high'], "fine_tuning", "9999")
-            tasks_list.append(task_prop)
-    elif opts.variation_type == 'dist':
-        for i in [3, 8]:
-            num_modes = i
-            task_prop = {'graph_size': opts.graph_size, 'num_modes': num_modes, 'dist': 'gmm', 'variation_type': opts.variation_type}
-            task_prop['test_dataset'] = "{}__size_{}_distribution_{}_{}_seed{}.pkl".format(opts.problem, task_prop['graph_size'], str(num_modes), "test", "1234")
-            task_prop['fine_tuning_dataset'] = "{}__size_{}_distribution_{}_{}_seed{}.pkl".format(opts.problem, task_prop['graph_size'], str(num_modes), "fine_tuning", "9999")
-            tasks_list.append(task_prop)
-    elif opts.variation_type == 'cap_vrp':
-        for i in [20, 50]:
-            vrp_capacity = i
-            task_prop = {'graph_size': opts.graph_size, 'vrp_capacity': vrp_capacity, 'low': 0, 'high': 1, 'variation_type': opts.variation_type}
-            task_prop['test_dataset'] = "{}__size_{}_cap_vrp_{}_{}_seed{}.pkl".format(opts.problem, task_prop['graph_size'], str(vrp_capacity), "test", "1234")
-            task_prop['fine_tuning_dataset'] = "{}__size_{}_cap_vrp_{}_{}_seed{}.pkl".format(opts.problem, task_prop['graph_size'], str(vrp_capacity), "fine_tuning", "9999")
-            tasks_list.append(task_prop)
-    elif opts.variation_type == 'mix_dist_size':
-        for i in [3, 5, 8]:
-            num_modes = i
-            task_prop = {'graph_size': opts.graph_size, 'num_modes': num_modes, 'dist': 'gmm', 'variation_type': opts.variation_type}
-            task_prop['test_dataset'] = "{}__size_{}_distribution_{}_{}_seed{}.pkl".format(opts.problem, task_prop['graph_size'], str(num_modes), "test", "1234")
-            task_prop['fine_tuning_dataset'] = "{}__size_{}_distribution_{}_{}_seed{}.pkl".format(opts.problem, task_prop['graph_size'], str(num_modes), "fine_tuning", "9999")
-            tasks_list.append(task_prop)
-    else:
-        print("Invalid task distribution: opts.variation_type!")
-        exit(0)
+    tasks_list = generate_test_task(opts)
     print("Task list: {}".format(tasks_list))
 
     baseline_dict, val_dict, fine_tuning_dict = {}, {}, {}
@@ -156,6 +121,8 @@ def run(opts):
         updated_reward = tune_and_test(task, model_meta, baseline, epoch, val_dataset, problem, tb_logger, opts, fine_tuning_dataset, dict_results_task_sample_iter_wise[task_string])
         total_reward_tasks += updated_reward
 
+    if not os.path.exists("results_all/test"):
+        os.makedirs("results_all/test")
     with open("results_all/test/TEST_" + opts.test_result_pickle_file, 'wb') as handle:
         pickle.dump(dict_results_task_sample_iter_wise, handle, protocol=pickle.HIGHEST_PROTOCOL)
 

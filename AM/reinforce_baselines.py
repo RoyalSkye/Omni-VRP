@@ -201,7 +201,6 @@ class RolloutBaseline(Baseline):
         """
         print("Evaluating candidate model on evaluation dataset")
         candidate_vals = rollout(model, self.dataset, self.opts).cpu().numpy()
-
         candidate_mean = candidate_vals.mean()
 
         print("Epoch {} candidate mean {}, baseline epoch {} mean {}, difference {}".format(
@@ -212,9 +211,9 @@ class RolloutBaseline(Baseline):
 
             p_val = p / 2  # one-sided
             assert t < 0, "T-statistic should be negative"
-            print("p-value: {}".format(p_val))
+            # print("p-value: {}".format(p_val))
             if p_val < self.opts.bl_alpha:
-                print('Update baseline')
+                # print('Update baseline')
                 self._update_model(model, epoch)
 
     def state_dict(self):

@@ -87,14 +87,12 @@ class AttentionModel(nn.Module):
 
             # Special embedding projection for depot node
             self.init_embed_depot = nn.Linear(2, embedding_dim)
-            
             if self.is_vrp and self.allow_partial:  # Need to include the demand if split delivery allowed
                 self.project_node_step = nn.Linear(1, 3 * embedding_dim, bias=False)
         else:  # TSP
             assert problem.NAME == "tsp", "Unsupported problem: {}".format(problem.NAME)
             step_context_dim = 2 * embedding_dim  # Embedding of first and last node
             node_dim = 2  # x, y
-            
             # Learned input symbols for first action
             self.W_placeholder = nn.Parameter(torch.Tensor(2 * embedding_dim))
             self.W_placeholder.data.uniform_(-1, 1)  # Placeholder should be in range of activations
@@ -121,25 +119,28 @@ class AttentionModel(nn.Module):
         if temp is not None:  # Do not change temperature if not provided
             self.temp = temp
 
-    def forward(self, input, return_pi=False):
+    def forward(self, input, return_pi=False, return_emb=False):
         """
         :param input: (batch_size, graph_size, node_dim) input node features or dictionary with multiple tensors
         :param return_pi: whether to return the output sequences, this is optional as it is not compatible with
         using DataParallel as the results may be of different lengths on different GPUs
         :return:
         """
-
         if self.checkpoint_encoder and self.training:  # Only checkpoint if we need gradients
             embeddings, _ = checkpoint(self.embedder, self._init_embed(input))
         else:
             embeddings, _ = self.embedder(self._init_embed(input))
 
-        _log_p, pi = self._inner(input, embeddings)
+        _log_p, pi = self._inner(input, embeddings, return_emb)
 
         cost, mask = self.problem.get_costs(input, pi)
         # Log likelyhood is calculated within the model since returning it per action does not work well with
         # DataParallel since sequences can be of different lengths
         ll = self._calc_log_likelihood(_log_p, pi, mask)
+
+        if (return_emb):
+            return self.embd_graph_mean_to_return
+
         if return_pi:
             return cost, ll, pi
 
@@ -171,7 +172,7 @@ class AttentionModel(nn.Module):
         flat_feas = flat_score > -1e10  # != -math.inf triggers
 
         # Parent is row idx of ind_topk, can be found by enumerating elements and dividing by number of columns
-        flat_parent = torch.arange(flat_action.size(-1), out=flat_action.new()) // ind_topk.size(-1)
+        flat_parent = torch.arange(flat_action.size(-1), out=flat_action.new()) / ind_topk.size(-1)
 
         # Filter infeasible
         feas_ind_2d = torch.nonzero(flat_feas)
@@ -202,9 +203,9 @@ class AttentionModel(nn.Module):
 
         if self.is_vrp or self.is_orienteering or self.is_pctsp:
             if self.is_vrp:
-                features = ('demand', )
+                features = ('demand',)
             elif self.is_orienteering:
-                features = ('prize', )
+                features = ('prize',)
             else:
                 assert self.is_pctsp
                 features = ('deterministic_prize', 'penalty')
@@ -221,7 +222,7 @@ class AttentionModel(nn.Module):
         # TSP
         return self.init_embed(input)
 
-    def _inner(self, input, embeddings):
+    def _inner(self, input, embeddings, return_emb=False):
 
         outputs = []
         sequences = []
@@ -229,7 +230,7 @@ class AttentionModel(nn.Module):
         state = self.problem.make_state(input)
 
         # Compute keys, values for the glimpse and keys for the logits once as they can be reused in every step
-        fixed = self._precompute(embeddings)
+        fixed = self._precompute(embeddings, return_emb=return_emb)
 
         batch_size = state.ids.size(0)
 
@@ -310,10 +311,14 @@ class AttentionModel(nn.Module):
             assert False, "Unknown decode type"
         return selected
 
-    def _precompute(self, embeddings, num_steps=1):
+    def _precompute(self, embeddings, num_steps=1, return_emb=False):
 
         # The fixed context projection of the graph embedding is calculated only once for efficiency
         graph_embed = embeddings.mean(1)
+
+        if (return_emb == True):
+            self.embd_graph_mean_to_return = graph_embed
+
         # fixed context = (batch_size, 1, embed_dim) to make broadcastable with parallel timesteps
         fixed_context = self.project_fixed_context(graph_embed)[:, None, :]
 
@@ -358,16 +363,29 @@ class AttentionModel(nn.Module):
         log_p, glimpse = self._one_to_many_logits(query, glimpse_K, glimpse_V, logit_K, mask)
 
         if normalize:
-            log_p = torch.log_softmax(log_p / self.temp, dim=-1)
+            log_p1 = torch.log_softmax(log_p / self.temp, dim=-1)
 
-        assert not torch.isnan(log_p).any()
+        # TODO: remove
+        if torch.isnan(log_p1).any():
+            torch.set_printoptions(profile="full")
+            print(log_p.size(), log_p)
+            print(log_p1.size(), log_p1)
+            print(mask.size(), mask)
+            torch.save(
+                {
+                    'log_p': log_p,
+                    'log_p1': log_p1,
+                    'mask': mask,
+                }, "./debug.pt")
 
-        return log_p, mask
+        assert not torch.isnan(log_p1).any()
+
+        return log_p1, mask
 
     def _get_parallel_step_context(self, embeddings, state, from_depot=False):
         """
         Returns the context per step, optionally for multiple steps at once (for efficient evaluation of the model)
-        
+
         :param embeddings: (batch_size, graph_size, embed_dim)
         :param prev_a: (batch_size, num_steps)
         :param first_a: Only used when num_steps = 1, action of first step or None if first step
@@ -423,7 +441,7 @@ class AttentionModel(nn.Module):
                 -1
             )
         else:  # TSP
-        
+
             if num_steps == 1:  # We need to special case if we have only 1 step, may be the first or not
                 if state.i.item() == 0:
                     # First and only step, ignore prev_a (this is a placeholder)
@@ -431,7 +449,8 @@ class AttentionModel(nn.Module):
                 else:
                     return embeddings.gather(
                         1,
-                        torch.cat((state.first_a, current_node), 1)[:, :, None].expand(batch_size, 2, embeddings.size(-1))
+                        torch.cat((state.first_a, current_node), 1)[:, :, None].expand(batch_size, 2,
+                                                                                       embeddings.size(-1))
                     ).view(batch_size, 1, -1)
             # More than one step, assume always starting with first
             embeddings_per_step = embeddings.gather(
@@ -487,7 +506,6 @@ class AttentionModel(nn.Module):
     def _get_attention_node_data(self, fixed, state):
 
         if self.is_vrp and self.allow_partial:
-
             # Need to provide information of how much each node has already been served
             # Clone demands as they are needed by the backprop whereas they are updated later
             glimpse_key_step, glimpse_val_step, logit_key_step = \
@@ -508,6 +526,6 @@ class AttentionModel(nn.Module):
 
         return (
             v.contiguous().view(v.size(0), v.size(1), v.size(2), self.n_heads, -1)
-            .expand(v.size(0), v.size(1) if num_steps is None else num_steps, v.size(2), self.n_heads, -1)
-            .permute(3, 0, 1, 2, 4)  # (n_heads, batch_size, num_steps, graph_size, head_dim)
+                .expand(v.size(0), v.size(1) if num_steps is None else num_steps, v.size(2), self.n_heads, -1)
+                .permute(3, 0, 1, 2, 4)  # (n_heads, batch_size, num_steps, graph_size, head_dim)
         )
