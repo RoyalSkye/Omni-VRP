@@ -152,7 +152,7 @@ class TSP(object):
 
 class TSPDataset(Dataset):
     
-    def __init__(self, filename=None, size=50, num_samples=10000, offset=0, distribution=None, task=None):
+    def __init__(self, filename=None, size=None, num_samples=10000, offset=0, distribution=None, task=None):
         super(TSPDataset, self).__init__()
 
         self.data_set = []
@@ -164,14 +164,16 @@ class TSPDataset(Dataset):
         else:
             if task['variation_type'] == 'size':
                 self.data = generate_uniform_tsp_data(num_samples, task['graph_size'], task['low'], task['high'])
-            if task['variation_type'] == 'scale':
+            elif task['variation_type'] == 'scale':
                 self.data = generate_uniform_tsp_data(num_samples, task['graph_size'], task['low'], task['high'])
-            if task['variation_type'] == 'dist':
+            elif task['variation_type'] == 'dist':
                 self.data = generate_GM_tsp_data_grid(num_samples, task['graph_size'], task['num_modes'])
-            if task['variation_type'] == 'mix_dist_size':
+            elif task['variation_type'] == 'mix_dist_size':
                 self.data = generate_GM_tsp_data_grid(num_samples, task['graph_size'], task['num_modes'])
+            elif task['variation_type'] in ['adv', 'size_uniform', 'size_two_cluster', 'size_three_cluster', 'size_increasing_order', 'size_decreasing_order', 'size_mix_order', 'size_shuffle_order']:
+                self.data = [torch.FloatTensor(task['graph_size'], 2).uniform_(0, 1) for i in range(num_samples)]
             else:
-                self.data = [torch.FloatTensor(size, 2).uniform_(0, 1) for i in range(num_samples)]  # Sample points randomly in [0, 1] square
+                self.data = [torch.FloatTensor(size, 2).uniform_(0, 1) for i in range(num_samples)]
 
         self.size = len(self.data)
 

@@ -60,6 +60,7 @@ class AttentionModel(nn.Module):
         self.n_encode_layers = n_encode_layers
         self.decode_type = None
         self.temp = 1.0
+        self.nan = False
         self.allow_partial = problem.NAME == 'sdvrp'
         self.is_vrp = problem.NAME == 'cvrp' or problem.NAME == 'sdvrp'
         self.is_orienteering = problem.NAME == 'op'
@@ -126,6 +127,7 @@ class AttentionModel(nn.Module):
         using DataParallel as the results may be of different lengths on different GPUs
         :return:
         """
+        self.input = input
         if self.checkpoint_encoder and self.training:  # Only checkpoint if we need gradients
             embeddings, _ = checkpoint(self.embedder, self._init_embed(input))
         else:
@@ -365,14 +367,18 @@ class AttentionModel(nn.Module):
         if normalize:
             log_p1 = torch.log_softmax(log_p / self.temp, dim=-1)
 
-        # TODO: remove
         if torch.isnan(log_p1).any():
+            self.nan = True
             torch.set_printoptions(profile="full")
-            print(log_p.size(), log_p)
-            print(log_p1.size(), log_p1)
-            print(mask.size(), mask)
+            index = ((log_p1 != log_p1).nonzero(as_tuple=True)[0]).tolist()
+            index = set(index)
+            print(">> Occur nan problem on index: {}".format(index))
+            for i in index:
+                print(self.input[i])
             torch.save(
                 {
+                    'input': self.input,
+                    'model': self.load_state_dict(),
                     'log_p': log_p,
                     'log_p1': log_p1,
                     'mask': mask,
@@ -381,6 +387,14 @@ class AttentionModel(nn.Module):
         assert not torch.isnan(log_p1).any()
 
         return log_p1, mask
+
+    def get_reset_nan(self):
+        """
+            deal with nan problem (log_p)
+        """
+        nan = self.nan
+        self.nan = False
+        return nan
 
     def _get_parallel_step_context(self, embeddings, state, from_depot=False):
         """

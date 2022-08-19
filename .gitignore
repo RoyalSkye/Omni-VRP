@@ -15,8 +15,8 @@ __pycache__/
 AM/data/
 AM/pretrained/
 AM/outputs/
+AM/tmp/
 
 # private files
 utils_plot*
-tmp/
 imgs/

@@ -2,6 +2,7 @@
 
 import os
 import json
+import random
 import pprint as pp
 from datetime import datetime
 
@@ -21,8 +22,9 @@ from generate_dataset import generate_train_task
 def run(opts):
     # hard-coded
     opts.graph_size = -1  # for variation_type == size
-    opts.variation_type = "mix_dist_size"
+    opts.variation_type = "size"
     opts.baseline_every_Xepochs_for_META = 7
+    opts.val_dataset_path = "../data/size/tsp/tsp100_validation_seed4321.pkl"
 
     # Pretty print the run args
     pp.pprint(vars(opts))
@@ -102,6 +104,8 @@ def run(opts):
             print(">> Time Out: 24hrs. Training finished {} epochs".format(epoch))
             break
         print(">> Epoch {}, alpha: {}".format(epoch, alpha))
+        if opts.variation_type == "size_shuffle_order":
+            random.shuffle(tasks_list)
         for index_task, task in enumerate(tasks_list):
             baseline = baseline_dict[str(task)]
             val_dataset = val_dict[str(task)]
@@ -114,7 +118,9 @@ def run(opts):
             save_checkpoint(model_meta, os.path.join(opts.save_dir, 'epoch-{}.pt'.format(epoch)))
 
         # add validation here.
-        pass
+        val_dataset = problem.make_dataset(filename=opts.val_dataset_path)
+        avg_reward = validate(model_meta, val_dataset, opts)
+        print(">> Epoch {} avg_cost on TSP100 validation set {}".format(epoch, avg_reward))
 
 
 if __name__ == "__main__":

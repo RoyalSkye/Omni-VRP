@@ -9,7 +9,7 @@ import torch.optim as optim
 import os
 from options import get_options
 from torch.utils.data import DataLoader
-from train import train_epoch, get_inner_model, clip_grad_norms, get_hard_samples
+from train import train_epoch, get_inner_model, clip_grad_norms, get_hard_samples, validate
 from reinforce_baselines import NoBaseline, ExponentialBaseline, CriticBaseline, RolloutBaseline, WarmupBaseline
 from nets.attention_model import AttentionModel, set_decode_type
 from nets.pointer_network import PointerNetwork, CriticNetworkLSTM
@@ -24,6 +24,7 @@ def run(opts):
     opts.variation_type = "mix_dist_size"
     update_task = False  # update AM by batch (default) or task (implementation of "On the Generalization of Neural Combinatorial Optimization Heuristics")
     eps = 0
+    opts.val_dataset_path = "../data/size/tsp/tsp100_validation_seed4321.pkl"
     # opts.baseline_every_Xepochs_for_META = 40  # set to default value for multi-AM / oracle-AM
 
     # Pretty print the run args
@@ -152,7 +153,9 @@ def run(opts):
             save_checkpoint(model_common, os.path.join(opts.save_dir, 'epoch-{}.pt'.format(epoch)))
 
         # add validation here.
-        pass
+        val_dataset = problem.make_dataset(filename=opts.val_dataset_path)
+        avg_reward = validate(model_meta, val_dataset, opts)
+        print(">> Epoch {} avg_cost on TSP100 validation set {}".format(epoch, avg_reward))
 
 
 if __name__ == "__main__":

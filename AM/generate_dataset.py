@@ -1,3 +1,5 @@
+from utils.functions import seed_everything, load_problem
+from utils.data_utils import save_dataset
 
 def generate_train_task(opts):
     tasks_list = []
@@ -40,6 +42,48 @@ def generate_train_task(opts):
     elif opts.variation_type == "adv":
         for i in range(3):
             task_prop = {'graph_size': opts.graph_size, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': 'adv'}
+            tasks_list.append(task_prop)
+    elif opts.variation_type == "size_uniform":
+        graph_sizes = [5, 15, 25, 35, 45, 55, 65, 75, 85, 95]
+        for g_sizes in graph_sizes:
+            task_prop = {'graph_size': g_sizes, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': opts.variation_type}
+            task_prop['insertion_heuristic_cost_file'] = "results_all/validation/gsize_{}_val_farthest_insertion.pkl".format(task_prop['graph_size'])
+            tasks_list.append(task_prop)
+    elif opts.variation_type == "size_two_cluster":
+        graph_sizes = [5, 6, 7, 8, 9, 95, 96, 97, 98, 99]
+        for g_sizes in graph_sizes:
+            task_prop = {'graph_size': g_sizes, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': opts.variation_type}
+            task_prop['insertion_heuristic_cost_file'] = "results_all/validation/gsize_{}_val_farthest_insertion.pkl".format(task_prop['graph_size'])
+            tasks_list.append(task_prop)
+    elif opts.variation_type == "size_three_cluster":
+        graph_sizes = [5, 7, 9, 47, 49, 51, 53, 95, 97, 99]
+        for g_sizes in graph_sizes:
+            task_prop = {'graph_size': g_sizes, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': opts.variation_type}
+            task_prop['insertion_heuristic_cost_file'] = "results_all/validation/gsize_{}_val_farthest_insertion.pkl".format(task_prop['graph_size'])
+            tasks_list.append(task_prop)
+    elif opts.variation_type == "size_increasing_order":
+        graph_sizes = [5, 15, 25, 35, 45, 55, 65, 75, 85, 95]
+        for g_sizes in graph_sizes:
+            task_prop = {'graph_size': g_sizes, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': opts.variation_type}
+            task_prop['insertion_heuristic_cost_file'] = "results_all/validation/gsize_{}_val_farthest_insertion.pkl".format(task_prop['graph_size'])
+            tasks_list.append(task_prop)
+    elif opts.variation_type == "size_decreasing_order":
+        graph_sizes = [95, 85, 75, 65, 55, 45, 35, 25, 15, 5]
+        for g_sizes in graph_sizes:
+            task_prop = {'graph_size': g_sizes, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': opts.variation_type}
+            task_prop['insertion_heuristic_cost_file'] = "results_all/validation/gsize_{}_val_farthest_insertion.pkl".format(task_prop['graph_size'])
+            tasks_list.append(task_prop)
+    elif opts.variation_type == "size_mix_order":
+        graph_sizes = [45, 55, 35, 65, 25, 75, 15, 85, 5, 95]
+        for g_sizes in graph_sizes:
+            task_prop = {'graph_size': g_sizes, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': opts.variation_type}
+            task_prop['insertion_heuristic_cost_file'] = "results_all/validation/gsize_{}_val_farthest_insertion.pkl".format(task_prop['graph_size'])
+            tasks_list.append(task_prop)
+    elif opts.variation_type == "size_shuffle_order":
+        graph_sizes = [5, 15, 25, 35, 45, 55, 65, 75, 85, 95]
+        for g_sizes in graph_sizes:
+            task_prop = {'graph_size': g_sizes, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': opts.variation_type}
+            task_prop['insertion_heuristic_cost_file'] = "results_all/validation/gsize_{}_val_farthest_insertion.pkl".format(task_prop['graph_size'])
             tasks_list.append(task_prop)
     else:
         print("Invalid task distribution: opts.variation_type!")
@@ -90,3 +134,20 @@ def generate_test_task(opts):
         exit(0)
 
     return tasks_list
+
+
+if __name__ == "__main__":
+    opts = {}
+    opts.seed = 1234
+    opts.problem = "tsp"
+    opts.variation_type = "size"
+    opts.graph_size = 40
+    opts.val_size = 10000
+
+    seed_everything(opts.seed)
+    problem = load_problem(opts.problem)
+
+    tasks_list = generate_test_task(opts)
+    for task in tasks_list:
+        test_set = problem.make_dataset(num_samples=opts.val_size, filename=None, distribution=None, task=task)
+        save_dataset(test_set, task['test_dataset'])
