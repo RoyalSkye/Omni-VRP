@@ -373,12 +373,10 @@ class AttentionModel(nn.Module):
             index = ((log_p1 != log_p1).nonzero(as_tuple=True)[0]).tolist()
             index = set(index)
             print(">> Occur nan problem on index: {}".format(index))
-            for i in index:
-                print(self.input[i])
             torch.save(
                 {
                     'input': self.input,
-                    'model': self.load_state_dict(),
+                    'model': self.state_dict(),
                     'log_p': log_p,
                     'log_p1': log_p1,
                     'mask': mask,

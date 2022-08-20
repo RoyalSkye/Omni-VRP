@@ -22,14 +22,14 @@ def generate_train_task(opts):
     elif opts.variation_type == 'dist':
         for i in [1, 2, 5]:
             num_modes = i
-            task_prop = {'graph_size': opts.graph_size, 'num_modes': num_modes, 'dist': 'gmm', 'variation_type': opts.variation_type}
+            task_prop = {'graph_size': opts.graph_size, 'low': 0, 'high': 1, 'num_modes': num_modes, 'dist': 'gmm', 'variation_type': opts.variation_type}
             task_prop['insertion_heuristic_cost_file'] = "results_all/validation/GRID_{}_modes_{}_val_farthest_insertion.pkl".format(task_prop['graph_size'], task_prop['num_modes'])
             tasks_list.append(task_prop)
     elif opts.variation_type == 'mix_dist_size':
         for i in [1, 2, 5]:
             for cur_graph_size in [20, 30, 50]:
                 num_modes = i
-                task_prop = {'graph_size': cur_graph_size, 'num_modes': num_modes, 'dist': 'gmm', 'variation_type': opts.variation_type}
+                task_prop = {'graph_size': cur_graph_size, 'low': 0, 'high': 1, 'num_modes': num_modes, 'dist': 'gmm', 'variation_type': opts.variation_type}
                 task_prop['insertion_heuristic_cost_file'] = "results_all/validation/GRID_{}_modes_{}_val_farthest_insertion.pkl".format(task_prop['graph_size'], task_prop['num_modes'])
                 tasks_list.append(task_prop)
     elif opts.variation_type == 'cap_vrp':

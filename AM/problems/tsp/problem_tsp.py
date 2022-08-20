@@ -14,9 +14,10 @@ def generate_GM_tsp_data_grid(dataset_size, graph_size, num_modes=-1, low=0, hig
     Code from "On the Generalization of Neural Combinatorial Optimization Heuristics".
     """
     import scipy
+    from scipy import stats
     from numpy.random import default_rng
     from numpy import meshgrid, array
-    # print("num modes ", num_modes)
+    # print(">> Generating data using Gaussian Mixture.")
     dataset = []
 
     for i in range(dataset_size):
@@ -155,7 +156,6 @@ class TSPDataset(Dataset):
     def __init__(self, filename=None, size=None, num_samples=10000, offset=0, distribution=None, task=None):
         super(TSPDataset, self).__init__()
 
-        self.data_set = []
         if filename is not None:
             assert os.path.splitext(filename)[1] == '.pkl'
             with open(filename, 'rb') as f:
@@ -173,7 +173,17 @@ class TSPDataset(Dataset):
             elif task['variation_type'] in ['adv', 'size_uniform', 'size_two_cluster', 'size_three_cluster', 'size_increasing_order', 'size_decreasing_order', 'size_mix_order', 'size_shuffle_order']:
                 self.data = [torch.FloatTensor(task['graph_size'], 2).uniform_(0, 1) for i in range(num_samples)]
             else:
+                print("[!] Default: generating uniform distribution data.")
                 self.data = [torch.FloatTensor(size, 2).uniform_(0, 1) for i in range(num_samples)]
+
+        # check validity of dataset, strange bugs: may generate coordinate out of (0, 1) range in rare instances even using uniform_(0, 1) e.g., [1.7500e+38, 2.4132e-01].
+        low = task['low'] if task is not None else 0
+        high = task['high'] if task is not None else 1
+        for i, x in enumerate(self.data):
+            if (x < low).any() or (x > high).any():
+                torch.set_printoptions(profile="full")
+                self.data[i] = torch.clamp(self.data[i], min=low, max=high)
+                print("[!] Generated dataset violates valid range ({}-{}): {}".format(low, high, x))
 
         self.size = len(self.data)
 

@@ -168,7 +168,6 @@ class RolloutBaseline(Baseline):
 
         if dataset is None:
             self.dataset = self.problem.make_dataset(num_samples=self.opts.val_size, distribution=self.opts.data_distribution, task=self.task)
-            # self.dataset = self.problem.make_dataset(size=self.opts.graph_size, num_samples=self.opts.val_size, distribution=self.opts.data_distribution)
         else:
             self.dataset = dataset
         print("Evaluating baseline model on evaluation dataset")
@@ -225,6 +224,7 @@ class RolloutBaseline(Baseline):
 
     def load_state_dict(self, state_dict):
         # We make it such that it works whether model was saved as data parallel or not
+        print(">> Load state dict in Baseline.")
         load_model = copy.deepcopy(self.model)
         get_inner_model(load_model).load_state_dict(get_inner_model(state_dict['model']).state_dict())
         self._update_model(load_model, state_dict['epoch'], state_dict['dataset'])

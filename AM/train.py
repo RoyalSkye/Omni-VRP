@@ -50,8 +50,7 @@ def rollout(model, dataset, opts, return_pi=False):
     if not return_pi:
         return torch.cat([
             eval_model_bat(bat)[0]
-            for bat
-            in tqdm(DataLoader(dataset, batch_size=opts.eval_batch_size), disable=opts.no_progress_bar)
+            for bat in tqdm(DataLoader(dataset, batch_size=opts.eval_batch_size), disable=opts.no_progress_bar)
         ], 0)
     else:
         cost_array, pi_array = [], []
