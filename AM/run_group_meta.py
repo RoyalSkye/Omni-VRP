@@ -1,11 +1,10 @@
 #!/usr/bin/env python
 
 import os
-import random
 import json
+import random
 import pprint as pp
 from datetime import datetime
-import numpy as np
 
 import torch
 import torch.optim as optim
@@ -20,10 +19,21 @@ from utils import torch_load_cpu, load_problem, seed_everything, save_checkpoint
 from generate_dataset import generate_train_task
 
 
+def assign_task_group(model_dict):
+    """
+    The kay idea:
+    At the first X epochs, we train one meta-model for all tasks (collect gradient at the same time).
+    Then, we cluster tasks into several group (deterministic), and continue training afterwards.
+    """
+    pass
+
+
 def run(opts):
     # hard-coded
-    opts.graph_size = 40  # for variation_type == size
-    opts.variation_type = "dist"
+    opts.shuffle = True
+    opts.graph_size = -1
+    opts.group = 3
+    opts.variation_type = "size"
     opts.baseline_every_Xepochs_for_META = 7
     opts.val_dataset = "../data/size/tsp/tsp100_validation_seed4321.pkl"
 
@@ -61,12 +71,13 @@ def run(opts):
         opts.epoch_start = epoch_resume + 1
 
     # Initialize model
+    model_dict, baseline_dict, val_dict = {}, {}, {}
     model_class = {
         'attention': AttentionModel,
         'pointer': PointerNetwork
     }.get(opts.model, None)
     assert model_class is not None, "Unknown model: {}".format(model_class)
-    model_meta = model_class(
+    model = model_class(
         opts.embedding_dim,
         opts.hidden_dim,
         problem,
@@ -80,50 +91,48 @@ def run(opts):
     ).to(opts.device)
 
     # if opts.use_cuda and torch.cuda.device_count() > 1:
-    #     model_meta = torch.nn.DataParallel(model_meta)
+    #     model = torch.nn.DataParallel(model)
 
     # Overwrite model parameters by parameters to load
-    model_ = get_inner_model(model_meta)
+    model_ = get_inner_model(model)
     model_.load_state_dict({**model_.state_dict(), **load_data.get('model', {})})
 
     # generate tasks based on task distribution.
     tasks_list = generate_train_task(opts)
-    # for i in range(3):
-    #     task_prop = {'graph_size': opts.graph_size, 'low': 0, 'high': 1, 'dist': 'uniform', 'variation_type': 'none'}
-    #     tasks_list.append(task_prop)
-
-    baseline_dict, val_dict = {}, {}
     print("{} tasks in task list: {}".format(len(tasks_list), tasks_list))
 
     for task in tasks_list:
-        baseline = RolloutBaseline(model_meta, problem, opts, task=task)
+        baseline = RolloutBaseline(model, problem, opts, task=task)
         baseline_dict[str(task)] = baseline
         val_dataset = problem.make_dataset(num_samples=opts.val_size, distribution=opts.data_distribution, task=task)
         val_dict[str(task)] = val_dataset
 
     alpha = opts.alpha
     start_time = datetime.now()
+    grad_dir = {}
     for epoch in range(opts.epoch_start, opts.epoch_start + opts.n_epochs):
         if (datetime.now() - start_time).total_seconds() >= 24*60*60:
             print(">> Time Out: 24hrs. Training finished {} epochs".format(epoch))
             break
+        if opts.shuffle:
+            random.shuffle(tasks_list)
         print(">> Epoch {}, alpha: {}".format(epoch, alpha))
-        for index_task, task in enumerate(tasks_list):
-            baseline = baseline_dict[str(task)]
-            val_dataset = val_dict[str(task)]
-            # eps = random.sample(np.arange(0, 50, 0.1).tolist(), 1)[0]
-            eps = random.sample([0, 0.1, 0.5, 1, 5, 10, 25, 50], 1)[0]
-            meta_train_epoch(model_meta, baseline, epoch, val_dataset, problem, tb_logger, opts, alpha, task, eps=eps)
+        if epoch < 100:
+            for index_task, task in enumerate(tasks_list):
+                baseline = baseline_dict[str(task)]
+                val_dataset = val_dict[str(task)]
+                meta_train_epoch(model, baseline, epoch, val_dataset, problem, tb_logger, opts, alpha, task)
+        else:
+            pass
 
         alpha = alpha * opts.alpha_decay
-
+        # save checkpoint
         if (opts.checkpoint_epochs != 0 and epoch % opts.checkpoint_epochs == 0) or epoch == opts.n_epochs - 1:
             print('Saving model and state...')
-            save_checkpoint(model_meta, os.path.join(opts.save_dir, 'epoch-{}.pt'.format(epoch)))
-
+            save_checkpoint(model_dict, os.path.join(opts.save_dir, 'epoch-{}.pt'.format(epoch)))
         # add validation here.
         if opts.val_dataset is not None:
-            val_dataset = problem.make_dataset(filename=opts.val_dataset_path)
+            val_dataset = problem.make_dataset(filename=opts.val_dataset)
             avg_reward = validate(model_meta, val_dataset, opts)
             print(">> Epoch {} avg_cost on TSP100 validation set {}".format(epoch, avg_reward))
 

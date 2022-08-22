@@ -60,7 +60,6 @@ class AttentionModel(nn.Module):
         self.n_encode_layers = n_encode_layers
         self.decode_type = None
         self.temp = 1.0
-        self.nan = False
         self.allow_partial = problem.NAME == 'sdvrp'
         self.is_vrp = problem.NAME == 'cvrp' or problem.NAME == 'sdvrp'
         self.is_orienteering = problem.NAME == 'op'
@@ -367,8 +366,8 @@ class AttentionModel(nn.Module):
         if normalize:
             log_p1 = torch.log_softmax(log_p / self.temp, dim=-1)
 
+        # used for debugging
         if torch.isnan(log_p1).any():
-            self.nan = True
             torch.set_printoptions(profile="full")
             index = ((log_p1 != log_p1).nonzero(as_tuple=True)[0]).tolist()
             index = set(index)
@@ -385,14 +384,6 @@ class AttentionModel(nn.Module):
         assert not torch.isnan(log_p1).any()
 
         return log_p1, mask
-
-    def get_reset_nan(self):
-        """
-            deal with nan problem (log_p)
-        """
-        nan = self.nan
-        self.nan = False
-        return nan
 
     def _get_parallel_step_context(self, embeddings, state, from_depot=False):
         """

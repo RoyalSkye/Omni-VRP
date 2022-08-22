@@ -16,6 +16,7 @@ AM/data/
 AM/pretrained/
 AM/outputs/
 AM/tmp/
+AM/new_data/
 
 # private files
 utils_plot*

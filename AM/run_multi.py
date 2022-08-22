@@ -24,7 +24,7 @@ def run(opts):
     opts.variation_type = "mix_dist_size"
     update_task = False  # update AM by batch (default) or task (implementation of "On the Generalization of Neural Combinatorial Optimization Heuristics")
     eps = 0
-    opts.val_dataset_path = "../data/size/tsp/tsp100_validation_seed4321.pkl"
+    opts.val_dataset = "../data/size/tsp/tsp100_validation_seed4321.pkl"
     # opts.baseline_every_Xepochs_for_META = 40  # set to default value for multi-AM / oracle-AM
 
     # Pretty print the run args
@@ -95,7 +95,7 @@ def run(opts):
     for task in tasks_list:
         baseline = RolloutBaseline(model_common, problem, opts, task=task)
         baseline_dict[str(task)] = baseline
-        val_dataset = problem.make_dataset(num_samples=opts.val_size, filename=opts.val_dataset, distribution=opts.data_distribution, task=task)
+        val_dataset = problem.make_dataset(num_samples=opts.val_size, distribution=opts.data_distribution, task=task)
         val_dict[str(task)] = val_dataset
 
     optimizer_common = optim.Adam(model_common.parameters(), opts.lr_model)
@@ -153,9 +153,10 @@ def run(opts):
             save_checkpoint(model_common, os.path.join(opts.save_dir, 'epoch-{}.pt'.format(epoch)))
 
         # add validation here.
-        val_dataset = problem.make_dataset(filename=opts.val_dataset_path)
-        avg_reward = validate(model_meta, val_dataset, opts)
-        print(">> Epoch {} avg_cost on TSP100 validation set {}".format(epoch, avg_reward))
+        if opts.val_dataset is not None:
+            val_dataset = problem.make_dataset(filename=opts.val_dataset_path)
+            avg_reward = validate(model_meta, val_dataset, opts)
+            print(">> Epoch {} avg_cost on TSP100 validation set {}".format(epoch, avg_reward))
 
 
 if __name__ == "__main__":

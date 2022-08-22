@@ -170,7 +170,7 @@ class TSPDataset(Dataset):
                 self.data = generate_GM_tsp_data_grid(num_samples, task['graph_size'], task['num_modes'])
             elif task['variation_type'] == 'mix_dist_size':
                 self.data = generate_GM_tsp_data_grid(num_samples, task['graph_size'], task['num_modes'])
-            elif task['variation_type'] in ['adv', 'size_uniform', 'size_two_cluster', 'size_three_cluster', 'size_increasing_order', 'size_decreasing_order', 'size_mix_order', 'size_shuffle_order']:
+            elif task['variation_type'] in ['adv', 'size_uniform', 'size_two_cluster', 'size_imbalanced', 'size_increasing_order', 'size_decreasing_order']:
                 self.data = [torch.FloatTensor(task['graph_size'], 2).uniform_(0, 1) for i in range(num_samples)]
             else:
                 print("[!] Default: generating uniform distribution data.")

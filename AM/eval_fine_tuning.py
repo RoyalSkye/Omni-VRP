@@ -22,13 +22,12 @@ import os
 
 def run(opts):
     # hard-coded
-    opts.graph_size = 40  # for variation_type == size
+    opts.graph_size = -1  # for variation_type == size
     opts.load_path = "/data/yxwu/jianan/generalization-NCO/AM/outputs/tsp_40/run_20220812T202208/epoch-1000.pt"
-    opts.variation_type = "dist"
+    opts.variation_type = "size"
+    opts.dir_path = '../new_data/{}/{}/'.format(opts.variation_type, opts.problem)
+    test_seed, fine_tune_seed = 2023, 2022
     opts.test_result_pickle_file = os.path.split(opts.load_path)[-1]
-
-    tune_sequence = []
-    epoch = 99999
 
     # Pretty print the run args
     pp.pprint(vars(opts))
@@ -80,7 +79,7 @@ def run(opts):
     model_ = get_inner_model(model_meta)
     model_.load_state_dict({**model_.state_dict(), **load_data.get('model', {})})
 
-    tasks_list = generate_test_task(opts)
+    tasks_list = generate_test_task(opts, test_seed, fine_tune_seed)
     print("Task list: {}".format(tasks_list))
 
     baseline_dict, val_dict, fine_tuning_dict = {}, {}, {}
@@ -88,15 +87,15 @@ def run(opts):
         baseline = RolloutBaseline(model_meta, problem, opts, task=task, update_baseline=False)
         baseline_dict[str(task)] = baseline
         print(">> Loading test/fine-tune dataset for task {}".format(task))
-        val_dataset = problem.make_dataset(filename='./data/'+opts.variation_type+'/'+opts.problem+'/'+task['test_dataset'], task=task)  # num_samples=opts.test_size,
-        # print(len(val_dataset))  # 5000
+        val_dataset = problem.make_dataset(filename=opts.dir_path+task['test_dataset'], task=task)
         val_dict[str(task)] = val_dataset
-        fine_tuning_dataset = problem.make_dataset(filename='./data/' + opts.variation_type + '/' + opts.problem + '/' + task['fine_tuning_dataset'], task=task)
-        # print(len(fine_tuning_dataset))  # 3000
+        fine_tuning_dataset = problem.make_dataset(filename=opts.dir_path+task['fine_tuning_dataset'], task=task)
         fine_tuning_dict[str(task)] = fine_tuning_dataset
 
     total_reward_tasks = 0
     dict_results_task_sample_iter_wise = {}
+    tune_sequence = []
+    epoch = 99999
 
     for task in tasks_list:
         task_string = None

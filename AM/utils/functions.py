@@ -19,15 +19,23 @@ def seed_everything(seed=2022):
 
 def save_checkpoint(model, path):
     from torch.nn import DataParallel
-    model = model.module if isinstance(model, DataParallel) else model
-    torch.save(
-        {
+    if isinstance(model, dict):
+        d = {
+            'rng_state': torch.get_rng_state(),
+            'cuda_rng_state': torch.cuda.get_rng_state_all(),
+            }
+        for k, v in model.items():
+            v = v.module if isinstance(v, DataParallel) else v
+            d['model{}'.format(k)] = v
+    else:
+        model = model.module if isinstance(model, DataParallel) else model
+        d = {
             'model': model.state_dict(),
             'rng_state': torch.get_rng_state(),
             'cuda_rng_state': torch.cuda.get_rng_state_all(),
-        },
-        path
-    )
+            }
+    torch.save(d, path)
+    print(">> Save checkpoint {} to {}".format(d.keys(), path))
 
 
 def load_problem(name):

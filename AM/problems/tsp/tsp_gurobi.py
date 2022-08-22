@@ -115,7 +115,7 @@ def solve_euclidian_tsp(points, threads=0, timeout=None, gap=None):
 def solve_all_gurobi(dataset):
     results = []
     for i, instance in enumerate(dataset):
-        print ("Solving instance {}".format(i))
+        print("Solving instance {}".format(i))
         result = solve_euclidian_tsp(instance)
         results.append(result)
     return results

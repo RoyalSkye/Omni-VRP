@@ -15,18 +15,17 @@ def get_options(args=None):
     # parser.add_argument('--epoch_size', type=int, default=1280000, help='Number of instances per epoch during training')
     parser.add_argument('--k_tune_steps', type=int, default=50,
                         help='Number of inner fine tuning steps during training. Set to 50( parameter applicable only to meta-training run_meta.py) ')
-    parser.add_argument('--alpha_decay', type=float, default=0.999, help='decaying reptile alpha')
+    parser.add_argument('--alpha_decay', type=float, default=0.998, help='decaying reptile alpha')
     parser.add_argument('--alpha', type=float, default=0.99, help='alpha')
-    parser.add_argument('--variation_type', type=str, default="size", choices=['size', 'dist', 'scale', 'mix_dist_size', 'cap_vrp'],
-                        help='type of the task distribution')
+    parser.add_argument('--variation_type', type=str, default="size", choices=['size', 'dist', 'scale', 'mix_dist_size', 'cap_vrp'], help='type of the task distribution')
     parser.add_argument('--baseline_every_Xepochs_for_META', type=int, default=40,
                         help='Controls frequency of baseline update. Set to 7 for meta-training. (need to set only for meta-training run_meta.py, for multi and scratch it is set to default value in options.py)')
     parser.add_argument('--train_tasks', type=str, default=None, help='train_tasks for cvrp')  # cvrp
     parser.add_argument('--test_num_step_epochs', type=int, default=50, help='Fine_tuning steps test')
-    parser.add_argument('--val_size', type=int, default=10000, help='Number of instances used for reporting validation performance')
+    parser.add_argument('--val_size', type=int, default=10000, help='Number of instances used for reporting validation/test performance')
     parser.add_argument('--fine_tune_size', type=int, default=3000, help='Number of instances used for fine-tuning')
     parser.add_argument('--val_dataset', type=str, default=None, help='Dataset file to use for validation')
-
+    parser.add_argument('--shuffle', action='store_true', help='whether shuffle training tasks')
 
     # Model
     parser.add_argument('--model', default='attention', help="Model, 'attention' (default) or 'pointer'")
@@ -44,7 +43,7 @@ def get_options(args=None):
     parser.add_argument('--lr_critic', type=float, default=1e-4, help="Set the learning rate for the critic network")
     parser.add_argument('--lr_decay', type=float, default=1.0, help='Learning rate decay per epoch')
     parser.add_argument('--eval_only', action='store_true', help='Set this value to only evaluate model')
-    parser.add_argument('--n_epochs', type=int, default=1500000, help='The number of epochs to train')
+    parser.add_argument('--n_epochs', type=int, default=2000, help='The number of epochs to train')
     parser.add_argument('--seed', type=int, default=1234, help='Random seed to use')
     parser.add_argument('--max_grad_norm', type=float, default=1.0,
                         help='Maximum L2 norm for gradient clipping, default 1.0 (0 to disable clipping)')
