@@ -12,11 +12,8 @@ __pycache__/
 .idea/
 
 # data & pretrain-model
-AM/data/
-AM/pretrained/
-AM/outputs/
-AM/tmp/
-AM/new_data/
+AM/
+result/
 
 # private files
 utils_plot*

@@ -5,6 +5,7 @@ import pickle
 import numpy as np
 from problems.tsp.state_tsp import StateTSP
 from utils.beam_search import beam_search
+from utils import move_to
 
 
 def generate_GM_tsp_data_grid(dataset_size, graph_size, num_modes=-1, low=0, high=1):
@@ -176,10 +177,11 @@ class TSPDataset(Dataset):
                 print("[!] Default: generating uniform distribution data.")
                 self.data = [torch.FloatTensor(size, 2).uniform_(0, 1) for i in range(num_samples)]
 
-        # check validity of dataset, strange bugs: may generate coordinate out of (0, 1) range in rare instances even using uniform_(0, 1) e.g., [1.7500e+38, 2.4132e-01].
+        # check validity of dataset, strange bugs: when moving cpu -> gpu, coordinate may out of (0, 1) range in rare instances even using uniform_(0, 1) e.g., [1.7500e+38, 2.4132e-01].
         low = task['low'] if task is not None else 0
         high = task['high'] if task is not None else 1
         for i, x in enumerate(self.data):
+            x = move_to(x, torch.device("cuda"))
             if (x < low).any() or (x > high).any():
                 torch.set_printoptions(profile="full")
                 self.data[i] = torch.clamp(self.data[i], min=low, max=high)

@@ -1,7 +1,6 @@
 import os
 import pickle
 import argparse
-from problems.tsp.problem_tsp import
 from problems.tsp.tsp_gurobi import solve_all_gurobi
 from utils import load_problem
 
@@ -15,7 +14,7 @@ if __name__ == "__main__":
     parser.add_argument('--offset', type=int, default=0, help='Offset where to start in dataset (default 0)')
     parser.add_argument('--num_samples', type=int, default=10000, help='Number of samples to evaluate (default 10000)')
 
-    opts = parser.parse_args(args)
+    opts = parser.parse_args()
 
     assert opts.problem == "tsp", "Unsupported currently!"
 
