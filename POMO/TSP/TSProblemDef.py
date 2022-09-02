@@ -3,12 +3,15 @@ import torch
 import numpy as np
 
 
-def get_random_problems(batch_size, problem_size, num_modes=0, distribution='uniform'):
+def get_random_problems(batch_size, problem_size, num_modes=0, cdist=0, distribution='uniform'):
+    """
+    Generate TSP data within range of [0, 1]
+    """
     # uniform distribution problems.shape: (batch, problem, 2)
     if distribution == "uniform":
         problems = torch.rand(size=(batch_size, problem_size, 2))
     elif distribution == "gaussian_mixture":
-        generate_gaussian_mixture_tsp(batch_size, problem_size, num_modes=num_modes, low=0, high=1)
+        problems = generate_gaussian_mixture_tsp(batch_size, problem_size, num_modes=num_modes, cdist=cdist)
     else:
         raise NotImplementedError
     return problems
@@ -36,65 +39,43 @@ def augment_xy_data_by_8_fold(problems):
     return aug_problems
 
 
-def generate_gaussian_mixture_tsp(dataset_size, problem_size, num_modes=-1, low=0, high=1):
-    """
-    TSP(N=problem_size, M=num_modes, L=(low, high))
-    GMM-9: each mode with N points; overall clipped to the 0-1 square.
-    sc: propto stdev of modes arounf the perfect grid; sc1: stdev at each mode.
-    Code from "On the Generalization of Neural Combinatorial Optimization Heuristics".
-    """
-    import scipy
-    from scipy import stats
-    from numpy.random import default_rng
-    from numpy import meshgrid, array
-    # print(">> Generating data using Gaussian Mixture.")
-    dataset = []
-    if num_modes == 0:
-        return torch.rand(size=(dataset_size, problem_size, 2))
+def generate_gaussian_mixture_tsp(dataset_size, graph_size, num_modes=0, cdist=0):
+    '''
+    Adaptation from AAAI-2022 "Learning to Solve Travelling Salesman Problem with Hardness-Adaptive Curriculum".
+    '''
 
-    for i in range(dataset_size):
-        cur_gauss = np.empty([0, 2])
-        remaining_elements = problem_size
-        modes_done = 0
-        sc = 1. / 9.
-        sc1 = .045
+    def gaussian_mixture(graph_size=100, num_modes=0, cdist=1):
+        '''
+        GMM create one instance of TSP-50, using cdist
+        '''
+        from sklearn.preprocessing import MinMaxScaler
+        nums = np.random.multinomial(graph_size, np.ones(num_modes) / num_modes)
+        xy = []
+        for num in nums:
+            center = np.random.uniform(0, cdist, size=(1, 2))
+            nxy = np.random.multivariate_normal(mean=center.squeeze(), cov=np.eye(2, 2), size=(num,))
+            xy.extend(nxy)
+        xy = np.array(xy)
+        xy = MinMaxScaler().fit_transform(xy)
+        return xy
 
-        rng = default_rng()
-        z = array((1., 3., 5.)) / 6
-        z = array(meshgrid(z, z))  # perfect grid\n",
-        z += rng.uniform(-sc, sc, size=z.shape)  # shake it a bit\n",
-        z = z.reshape(2, 9)
-        cells_chosen = np.random.choice(9, num_modes, replace=False)
-
-        mu_x_array = []
-        mu_y_array = []
-        for mode in cells_chosen:
-            # grid_x = mode//3
-            # grid_y = mode % 3
-            mu_x = z[0][mode]
-            mu_y = z[1][mode]
-            mu_x_array.append(mu_x)
-            mu_y_array.append(mu_y)
-
-            elements_in_this_mode = int(remaining_elements / (num_modes - modes_done))
-            samples_x = scipy.stats.truncnorm.rvs((low - mu_x) / sc1, (high - mu_x) / sc1, loc=mu_x, scale=sc1,
-                                                  size=elements_in_this_mode)
-            samples_y = scipy.stats.truncnorm.rvs((low - mu_y) / sc1, (high - mu_y) / sc1, loc=mu_y, scale=sc1,
-                                                  size=elements_in_this_mode)
-            samples = np.stack((samples_x, samples_y), axis=1)
-            cur_gauss = np.concatenate((cur_gauss, samples))
-            remaining_elements = remaining_elements - elements_in_this_mode
-            modes_done += 1
-
-        data = torch.Tensor(cur_gauss)
-        data = data.reshape(problem_size, 2)
-        dataset.append(data)
-
-    # print(num_modes, " dataset ", dataset[0])
-
-    return torch.stack(dataset, dim=0)
+    if num_modes == 0 and cdist == 0:
+        return torch.rand(size=(dataset_size, graph_size, 2))
+    else:
+        res = []
+        for i in range(dataset_size):
+            res.append(gaussian_mixture(graph_size=graph_size, num_modes=num_modes, cdist=cdist))
+        return torch.Tensor(np.array(res))
 
 
 if __name__ == "__main__":
-    data = generate_gaussian_mixture_tsp(dataset_size=10000, problem_size=20, num_modes=1, low=0, high=1)
-    print(type(data), data.size())
+    import os, sys
+    os.chdir(os.path.dirname(os.path.abspath(__file__)))
+    sys.path.insert(0, "..")  # for utils
+    from utils.functions import show, seed_everything
+    seed_everything(seed=1234)
+
+    data = generate_gaussian_mixture_tsp(dataset_size=64, graph_size=100, num_modes=1, cdist=1)
+    print(type(data), data.size(), data)
+    x, y = data[0, :, 0].tolist(), data[0, :, -1].tolist()
+    show([x], [y], label=["Gaussian Mixture"], title="TSP100", xdes="x", ydes="y", path="./tsp.pdf")

@@ -1,4 +1,5 @@
 import copy
+import math
 import random
 import torch
 from logging import getLogger
@@ -37,34 +38,40 @@ class TSPTrainer:
         if USE_CUDA:
             cuda_device_num = self.trainer_params['cuda_device_num']
             torch.cuda.set_device(cuda_device_num)
-            device = torch.device('cuda', cuda_device_num)
+            self.device = torch.device('cuda', cuda_device_num)
             torch.set_default_tensor_type('torch.cuda.FloatTensor')
         else:
-            device = torch.device('cpu')
+            self.device = torch.device('cpu')
             torch.set_default_tensor_type('torch.FloatTensor')
 
         # Main Components
         self.meta_model = Model(**self.model_params)
-        if self.meta_params['data_type'] == "distribution":
-            self.task_set = [m for m in range(0, self.meta_params['num_task'])]
-        elif self.meta_params['data_type'] == "size":
-            self.task_set = [n for n in range(4, 4 + 2 * self.meta_params['num_task'])]
+        self.alpha = self.meta_params['alpha']
+        if self.meta_params['data_type'] == "distribution":  # focus on the TSP100 with different distributions
+            self.task_set = [(m, l) for l in [1, 10, 20, 30, 50] for m in range(1, 1+self.meta_params['num_task']//5)] + [(0, 0)]
+        elif self.meta_params['data_type'] == "size":  # focus on uniform distribution with different sizes
+            self.task_set = [(n, ) for n in range(5, 5 + 5 * self.meta_params['num_task'], 5)]
+        elif self.meta_params['data_type'] == "size_distribution":
+            task_set = [(m, l) for l in [1, 10, 20, 30, 50] for m in range(1, 11)] + [(0, 0)]
+            self.task_set = [(n, m, l) for n in [25, 50, 75, 100, 125, 150] for (m, l) in task_set]
         else:
-            # TODO: size_distribution to be implemented.
             raise NotImplementedError
         print(">> Training task set: {}".format(self.task_set))
+        assert self.trainer_params['meta_params']['epochs'] == math.ceil((1000 * 100000) / (
+                    self.trainer_params['meta_params']['B'] * self.trainer_params['meta_params']['k'] *
+                    self.trainer_params['meta_params']['meta_batch_size'])), ">> meta-learning iteration does not match with POMO!"
 
         # Restore
         self.start_epoch = 1
         model_load = trainer_params['model_load']
         if model_load['enable']:
             checkpoint_fullname = '{path}/checkpoint-{epoch}.pt'.format(**model_load)
-            checkpoint = torch.load(checkpoint_fullname, map_location=device)
-            self.model.load_state_dict(checkpoint['model_state_dict'])
+            checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
+            self.meta_model.load_state_dict(checkpoint['model_state_dict'])
             self.start_epoch = 1 + model_load['epoch']
             self.result_log.set_raw_data(checkpoint['result_log'])
-            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.scheduler.last_epoch = model_load['epoch']-1
+            # self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            # self.scheduler.last_epoch = model_load['epoch']-1
             self.logger.info('Saved Model Loaded !!')
 
         # utility
@@ -109,9 +116,9 @@ class TSPTrainer:
                 self.logger.info("Saving trained_model")
                 checkpoint_dict = {
                     'epoch': epoch,
-                    'model_state_dict': self.model.state_dict(),
-                    'optimizer_state_dict': self.optimizer.state_dict(),
-                    'scheduler_state_dict': self.scheduler.state_dict(),
+                    'model_state_dict': self.meta_model.state_dict(),
+                    # 'optimizer_state_dict': self.optimizer.state_dict(),
+                    # 'scheduler_state_dict': self.scheduler.state_dict(),
                     'result_log': self.result_log.get_raw_data()
                 }
                 torch.save(checkpoint_dict, '{}/checkpoint-{}.pt'.format(self.result_folder, epoch))
@@ -134,6 +141,7 @@ class TSPTrainer:
         loss_AM = AverageMeter()
 
         batch_size = self.meta_params['meta_batch_size']
+        self._alpha_scheduler(epoch)
         slow_weights = copy.deepcopy(self.meta_model.state_dict())
         fast_weights = []
 
@@ -144,30 +152,34 @@ class TSPTrainer:
             env_params = {
                 'problem_size': task_params,
                 'pomo_size': task_params,
-            } if self.meta_params['data_type'] == 'size' else self.env_params
+            } if self.meta_params['data_type'] != 'distribution' else self.env_params
             env = Env(**env_params)
 
             for batch_id in range(self.meta_params['k']):
                 # generate task-specific data
                 if self.meta_params['data_type'] == 'distribution':
-                    data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params, distribution='gaussian_mixture')
+                    assert len(task_params) == 2
+                    data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[-1], distribution='gaussian_mixture')
                 elif self.meta_params['data_type'] == 'size':
-                    data = get_random_problems(batch_size, task_params, num_modes=0, distribution='uniform')
+                    assert len(task_params) == 1
+                    data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform')
+                elif self.meta_params['data_type'] == "size_distribution":
+                    assert len(task_params) == 3
+                    data = get_random_problems(batch_size, problem_size=task_params[0], num_modes=task_params[1], cdist=task_params[-1], distribution='gaussian_mixture')
                 else:
-                    # TODO: size_distribution to be implemented.
                     raise NotImplementedError
                 avg_score, avg_loss = self._train_one_batch(task_model, data, optimizer, env)
                 score_AM.update(avg_score, batch_size)
                 loss_AM.update(avg_loss, batch_size)
 
-            fast_weights[i] = task_model.state_dict()
+            fast_weights.append(task_model.state_dict())
 
-        state_dict = {params_key: (slow_weights[params_key] + alpha * torch.mean(torch.stack([fast_weight[params_key] - slow_weights[params_key] for fast_weight in fast_weights], dim=0), dim=0))
+        state_dict = {params_key: (slow_weights[params_key] + self.alpha * torch.mean(torch.stack([fast_weight[params_key] - slow_weights[params_key] for fast_weight in fast_weights], dim=0), dim=0))
                       for params_key in slow_weights}
         self.meta_model.load_state_dict(state_dict)
 
         # Log Once, for each epoch
-        self.logger.info('Meta Iteration {:3d}: Score: {:.4f},  Loss: {:.4f}'.format(epoch, score_AM.avg, loss_AM.avg))
+        self.logger.info('Meta Iteration {:3d}: alpha: {:6f}, Score: {:.4f},  Loss: {:.4f}'.format(epoch, self.alpha, score_AM.avg, loss_AM.avg))
 
         return score_AM.avg, loss_AM.avg
 
@@ -215,3 +227,6 @@ class TSPTrainer:
         TODO: a simple implementation of fast evaluation at the end of each meta training iteration.
         """
         return 0, 0
+
+    def _alpha_scheduler(self, iter):
+        self.alpha *= self.meta_params['alpha_decay']

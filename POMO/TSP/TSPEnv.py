@@ -49,7 +49,7 @@ class TSPEnv:
         # shape: (batch, pomo, 0~problem)
 
     def load_problems(self, batch_size, problems=None, aug_factor=1):
-        if problems:
+        if problems is not None:
             self.batch_size = problems.size(0)
             self.problems = problems
         else:

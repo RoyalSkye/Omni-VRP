@@ -34,10 +34,10 @@ class TSPTrainer:
         if USE_CUDA:
             cuda_device_num = self.trainer_params['cuda_device_num']
             torch.cuda.set_device(cuda_device_num)
-            device = torch.device('cuda', cuda_device_num)
+            self.device = torch.device('cuda', cuda_device_num)
             torch.set_default_tensor_type('torch.cuda.FloatTensor')
         else:
-            device = torch.device('cpu')
+            self.device = torch.device('cpu')
             torch.set_default_tensor_type('torch.FloatTensor')
 
         # Main Components
@@ -51,7 +51,7 @@ class TSPTrainer:
         model_load = trainer_params['model_load']
         if model_load['enable']:
             checkpoint_fullname = '{path}/checkpoint-{epoch}.pt'.format(**model_load)
-            checkpoint = torch.load(checkpoint_fullname, map_location=device)
+            checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
             self.model.load_state_dict(checkpoint['model_state_dict'])
             self.start_epoch = 1 + model_load['epoch']
             self.result_log.set_raw_data(checkpoint['result_log'])
@@ -150,12 +150,6 @@ class TSPTrainer:
 
         # Prep
         self.model.train()
-
-        #
-        for i in self.model.state_dict():
-            print(i)
-        exit(0)
-
         self.env.load_problems(batch_size)
         reset_state, _, _ = self.env.reset()
         self.model.pre_forward(reset_state)

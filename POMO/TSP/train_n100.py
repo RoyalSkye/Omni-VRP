@@ -4,12 +4,13 @@ sys.path.insert(0, "..")  # for utils
 import torch
 import logging
 from utils.utils import create_logger, copy_all_src
+from utils.functions import seed_everything
 from TSPTrainer import TSPTrainer as Trainer
 from TSPTrainer_Meta import TSPTrainer as Trainer_Meta
 
 DEBUG_MODE = False
 USE_CUDA = not DEBUG_MODE and torch.cuda.is_available()
-CUDA_DEVICE_NUM = 0
+CUDA_DEVICE_NUM = 0  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
 
 ##########################################################################################
 # parameters
@@ -44,6 +45,7 @@ optimizer_params = {
 trainer_params = {
     'use_cuda': USE_CUDA,
     'cuda_device_num': CUDA_DEVICE_NUM,
+    'seed': 1234,
     'epochs': 1000,
     'train_episodes': 100000,  # number of instances per epoch
     'train_batch_size': 64,
@@ -52,7 +54,7 @@ trainer_params = {
         'img_save_interval': 100,
         'log_image_params_1': {
             'json_foldername': 'log_image_style',
-            'filename': 'style_tsp_100.json'
+            'filename': 'general.json'
         },
         'log_image_params_2': {
             'json_foldername': 'log_image_style',
@@ -74,6 +76,8 @@ trainer_params = {
         'k': 50,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'meta_batch_size': 64,  # the batch size of the inner-loop optimization
         'num_task': 50,  # the number of tasks in the training task set
+        'alpha': 0.99,  # used for the outer-loop optimization of reptile
+        'alpha_decay': 0.999,
     }
 }
 
@@ -92,9 +96,13 @@ def main():
     create_logger(**logger_params)
     _print_config()
 
+    seed_everything(trainer_params['seed'])
+
     if not trainer_params['meta_params']['enable']:
+        print(">> Start POMO Training.")
         trainer = Trainer(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
     else:
+        print(">> Start POMO-Meta Training.")
         trainer = Trainer_Meta(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
 
     copy_all_src(trainer.result_folder)

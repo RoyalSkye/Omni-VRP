@@ -4,6 +4,7 @@ sys.path.insert(0, "..")  # for utils
 import torch
 import logging
 from utils.utils import create_logger, copy_all_src
+from utils.functions import seed_everything
 from TSPTester import TSPTester as Tester
 
 DEBUG_MODE = False
@@ -32,6 +33,7 @@ model_params = {
 tester_params = {
     'use_cuda': USE_CUDA,
     'cuda_device_num': CUDA_DEVICE_NUM,
+    'seed': 2023,
     'model_load': {
         'path': './result/saved_tsp100_model2_longTrain',  # directory path of pre-trained model and log files saved.
         'epoch': 3100,  # epoch version of pre-trained model to laod.
@@ -59,6 +61,8 @@ def main():
 
     create_logger(**logger_params)
     _print_config()
+
+    seed_everything(tester_params['seed'])
 
     tester = Tester(env_params=env_params,
                     model_params=model_params,
