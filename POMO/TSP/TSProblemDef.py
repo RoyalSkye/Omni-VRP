@@ -3,6 +3,22 @@ import torch
 import numpy as np
 
 
+def generate_task_set(meta_params):
+    if meta_params['data_type'] == "distribution":  # focus on the TSP100 with different distributions
+        task_set = [(m, l) for l in [1, 10, 20, 30, 50] for m in range(1, 1 + meta_params['num_task'] // 5)] + [(0, 0)]
+    elif meta_params['data_type'] == "size":  # focus on uniform distribution with different sizes
+        task_set = [(n,) for n in range(5, 5 + 5 * meta_params['num_task'], 5)]
+    elif meta_params['data_type'] == "size_distribution":
+        task_set = [(m, l) for l in [1, 10, 20, 30, 50] for m in range(1, 11)] + [(0, 0)]
+        task_set = [(n, m, l) for n in [25, 50, 75, 100, 125, 150] for (m, l) in task_set]
+    else:
+        raise NotImplementedError
+    print(">> Generating training task set: {} tasks with type {}".format(len(task_set), meta_params['data_type']))
+    print(">> Training task set: {}".format(task_set))
+
+    return task_set
+
+
 def get_random_problems(batch_size, problem_size, num_modes=0, cdist=0, distribution='uniform'):
     """
     Generate TSP data within range of [0, 1]

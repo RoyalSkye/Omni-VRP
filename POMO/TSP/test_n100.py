@@ -43,6 +43,14 @@ tester_params = {
     'augmentation_enable': True,
     'aug_factor': 8,
     'aug_batch_size': 100,
+    'test_set_path': '',
+    'fine_tune_params': {
+        'enable': False,  # evaluate few-shot generalization
+        'data_num': 3000,  # how many data used to fine-tune the pretrained model
+        'k': 50,  # gradient decent steps in the inner-loop optimization of meta-learning method
+        'fine_tune_batch_size': 64,  # the batch size of the inner-loop optimization
+        'fine_tune_set_path': '',
+    }
 }
 if tester_params['augmentation_enable']:
     tester_params['test_batch_size'] = tester_params['aug_batch_size']
@@ -86,4 +94,7 @@ def _print_config():
 
 
 if __name__ == "__main__":
+    # TODO: 1. add few-shot testing
+    #  2. generate testing dataset with optimal solution
+    #  3. the implementation of our method
     main()

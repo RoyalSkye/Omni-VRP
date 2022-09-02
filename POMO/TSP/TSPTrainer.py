@@ -1,4 +1,4 @@
-
+import random
 import torch
 from logging import getLogger
 
@@ -7,6 +7,7 @@ from TSPModel import TSPModel as Model
 
 from torch.optim import Adam as Optimizer
 from torch.optim.lr_scheduler import MultiStepLR as Scheduler
+from TSProblemDef import get_random_problems, generate_task_set
 
 from utils.utils import *
 
@@ -23,6 +24,7 @@ class TSPTrainer:
         self.model_params = model_params
         self.optimizer_params = optimizer_params
         self.trainer_params = trainer_params
+        self.meta_params = trainer_params['meta_params'] if 'meta_params' in trainer_params.keys() else None
 
         # result folder, logger
         self.logger = getLogger(name='trainer')
@@ -42,7 +44,8 @@ class TSPTrainer:
 
         # Main Components
         self.model = Model(**self.model_params)
-        self.env = Env(**self.env_params)
+        self.task_set = generate_task_set(self.trainer_params['meta_params'])
+        # self.env = Env(**self.env_params)
         self.optimizer = Optimizer(self.model.parameters(), **self.optimizer_params['optimizer'])
         self.scheduler = Scheduler(self.optimizer, **self.optimizer_params['scheduler'])
 
@@ -122,11 +125,24 @@ class TSPTrainer:
         episode = 0
         loop_cnt = 0
         while episode < train_num_episode:
-
             remaining = train_num_episode - episode
             batch_size = min(self.trainer_params['train_batch_size'], remaining)
 
-            avg_score, avg_loss = self._train_one_batch(batch_size)
+            # generate task-specific data
+            task_params = random.sample(self.task_set, 1)[0]
+            if self.meta_params['data_type'] == 'distribution':
+                assert len(task_params) == 2
+                data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[-1], distribution='gaussian_mixture')
+            elif self.meta_params['data_type'] == 'size':
+                assert len(task_params) == 1
+                data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform')
+            elif self.meta_params['data_type'] == "size_distribution":
+                assert len(task_params) == 3
+                data = get_random_problems(batch_size, problem_size=task_params[0], num_modes=task_params[1], cdist=task_params[-1], distribution='gaussian_mixture')
+            else:
+                raise NotImplementedError
+            env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
+            avg_score, avg_loss = self._train_one_batch(data, Env(**env_params))
             score_AM.update(avg_score, batch_size)
             loss_AM.update(avg_loss, batch_size)
 
@@ -146,22 +162,23 @@ class TSPTrainer:
 
         return score_AM.avg, loss_AM.avg
 
-    def _train_one_batch(self, batch_size):
+    def _train_one_batch(self, data, env):
 
         # Prep
         self.model.train()
-        self.env.load_problems(batch_size)
-        reset_state, _, _ = self.env.reset()
+        batch_size = data.size(0)
+        env.load_problems(batch_size, problems=data, aug_factor=1)
+        reset_state, _, _ = env.reset()
         self.model.pre_forward(reset_state)
-        prob_list = torch.zeros(size=(batch_size, self.env.pomo_size, 0))
+        prob_list = torch.zeros(size=(batch_size, env.pomo_size, 0))
         # shape: (batch, pomo, 0~problem)
 
         # POMO Rollout, please note that the reward is negative (i.e., -length of route).
-        state, reward, done = self.env.pre_step()
+        state, reward, done = env.pre_step()
         while not done:
             selected, prob = self.model(state)
             # shape: (batch, pomo)
-            state, reward, done = self.env.step(selected)
+            state, reward, done = env.step(selected)
             prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
 
         # Loss

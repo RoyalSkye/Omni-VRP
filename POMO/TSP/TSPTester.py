@@ -20,23 +20,22 @@ class TSPTester:
         self.env_params = env_params
         self.model_params = model_params
         self.tester_params = tester_params
+        self.fine_tune_params = tester_params['fine_tune_params']
 
         # result folder, logger
         self.logger = getLogger(name='trainer')
         self.result_folder = get_result_folder()
-
 
         # cuda
         USE_CUDA = self.tester_params['use_cuda']
         if USE_CUDA:
             cuda_device_num = self.tester_params['cuda_device_num']
             torch.cuda.set_device(cuda_device_num)
-            device = torch.device('cuda', cuda_device_num)
+            self.device = torch.device('cuda', cuda_device_num)
             torch.set_default_tensor_type('torch.cuda.FloatTensor')
         else:
-            device = torch.device('cpu')
+            self.device = torch.device('cpu')
             torch.set_default_tensor_type('torch.FloatTensor')
-        self.device = device
 
         # ENV and MODEL
         self.env = Env(**self.env_params)
@@ -45,7 +44,7 @@ class TSPTester:
         # Restore
         model_load = tester_params['model_load']
         checkpoint_fullname = '{path}/checkpoint-{epoch}.pt'.format(**model_load)
-        checkpoint = torch.load(checkpoint_fullname, map_location=device)
+        checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
 
         # utility
@@ -65,7 +64,10 @@ class TSPTester:
             remaining = test_num_episode - episode
             batch_size = min(self.tester_params['test_batch_size'], remaining)
 
-            score, aug_score = self._test_one_batch(batch_size)
+            if self.fine_tune_params['enable']:  # few-shot
+                score, aug_score = self._fine_tune_one_batch(batch_size)
+            else:  # zero-shot
+                score, aug_score = self._test_one_batch(batch_size)
 
             score_AM.update(score, batch_size)
             aug_score_AM.update(aug_score, batch_size)
@@ -121,3 +123,9 @@ class TSPTester:
         aug_score = -max_aug_pomo_reward.float().mean()  # negative sign to make positive value
 
         return no_aug_score.item(), aug_score.item()
+
+    def _fine_tune_one_batch(self):
+        """
+        evaluate few-shot generalization: fine-tune k steps on a small dataset
+        """
+        pass

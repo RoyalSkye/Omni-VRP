@@ -9,7 +9,7 @@ from TSPModel import TSPModel as Model
 
 from torch.optim import Adam as Optimizer
 from torch.optim.lr_scheduler import MultiStepLR as Scheduler
-from TSProblemDef import get_random_problems
+from TSProblemDef import get_random_problems, generate_task_set
 
 from utils.utils import *
 
@@ -47,16 +47,7 @@ class TSPTrainer:
         # Main Components
         self.meta_model = Model(**self.model_params)
         self.alpha = self.meta_params['alpha']
-        if self.meta_params['data_type'] == "distribution":  # focus on the TSP100 with different distributions
-            self.task_set = [(m, l) for l in [1, 10, 20, 30, 50] for m in range(1, 1+self.meta_params['num_task']//5)] + [(0, 0)]
-        elif self.meta_params['data_type'] == "size":  # focus on uniform distribution with different sizes
-            self.task_set = [(n, ) for n in range(5, 5 + 5 * self.meta_params['num_task'], 5)]
-        elif self.meta_params['data_type'] == "size_distribution":
-            task_set = [(m, l) for l in [1, 10, 20, 30, 50] for m in range(1, 11)] + [(0, 0)]
-            self.task_set = [(n, m, l) for n in [25, 50, 75, 100, 125, 150] for (m, l) in task_set]
-        else:
-            raise NotImplementedError
-        print(">> Training task set: {}".format(self.task_set))
+        self.task_set = generate_task_set(self.meta_params)
         assert self.trainer_params['meta_params']['epochs'] == math.ceil((1000 * 100000) / (
                     self.trainer_params['meta_params']['B'] * self.trainer_params['meta_params']['k'] *
                     self.trainer_params['meta_params']['meta_batch_size'])), ">> meta-learning iteration does not match with POMO!"
@@ -96,11 +87,11 @@ class TSPTrainer:
             self.result_log.append('train_loss', epoch, train_loss)
 
             # Logs & Checkpoint
-            elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.trainer_params['epochs'])
+            elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.meta_params['epochs'])
             self.logger.info("Epoch {:3d}/{:3d}: Time Est.: Elapsed[{}], Remain[{}]".format(
-                epoch, self.trainer_params['epochs'], elapsed_time_str, remain_time_str))
+                epoch, self.meta_params['epochs'], elapsed_time_str, remain_time_str))
 
-            all_done = (epoch == self.trainer_params['epochs'])
+            all_done = (epoch == self.meta_params['epochs'])
             model_save_interval = self.trainer_params['logging']['model_save_interval']
             img_save_interval = self.trainer_params['logging']['img_save_interval']
 
@@ -149,12 +140,6 @@ class TSPTrainer:
             task_params = random.sample(self.task_set, 1)[0]  # uniform sample a task
             task_model = copy.deepcopy(self.meta_model)
             optimizer = Optimizer(task_model.parameters(), **self.optimizer_params['optimizer'])
-            env_params = {
-                'problem_size': task_params,
-                'pomo_size': task_params,
-            } if self.meta_params['data_type'] != 'distribution' else self.env_params
-            env = Env(**env_params)
-
             for batch_id in range(self.meta_params['k']):
                 # generate task-specific data
                 if self.meta_params['data_type'] == 'distribution':
@@ -168,7 +153,8 @@ class TSPTrainer:
                     data = get_random_problems(batch_size, problem_size=task_params[0], num_modes=task_params[1], cdist=task_params[-1], distribution='gaussian_mixture')
                 else:
                     raise NotImplementedError
-                avg_score, avg_loss = self._train_one_batch(task_model, data, optimizer, env)
+                env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
+                avg_score, avg_loss = self._train_one_batch(task_model, data, optimizer, Env(**env_params))
                 score_AM.update(avg_score, batch_size)
                 loss_AM.update(avg_loss, batch_size)
 
@@ -188,7 +174,7 @@ class TSPTrainer:
         # Prep
         task_model.train()
         batch_size = data.size(0)
-        env.load_problems(batch_size, problems=data)
+        env.load_problems(batch_size, problems=data, aug_factor=1)
         reset_state, _, _ = env.reset()
         task_model.pre_forward(reset_state)
         prob_list = torch.zeros(size=(batch_size, env.pomo_size, 0))
