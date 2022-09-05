@@ -1,26 +1,29 @@
-#!/usr/bin/python
-
-# Copyright 2017, Gurobi Optimization, Inc.
-
-# Solve a traveling salesman problem on a set of
-# points using lazy constraints.   The base MIP model only includes
-# 'degree-2' constraints, requiring each node to have exactly
-# two incident edges.  Solutions to this model may contain subtours -
-# tours that don't visit every city.  The lazy constraint callback
-# adds new constraints to cut them off.
-
+import os, sys
+import time
+import glob
+import pickle
 import argparse
 import numpy as np
-from utils.data_utils import load_dataset, save_dataset
 from gurobipy import *
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+sys.path.insert(0, "..")  # for utils
+from utils.functions import seed_everything, load_dataset, save_dataset
 
 
 def solve_euclidian_tsp(points, threads=0, timeout=None, gap=None):
     """
-    Solves the Euclidan TSP problem to optimality using the MIP formulation 
+    Copyright 2017, Gurobi Optimization, Inc.
+    Solve a traveling salesman problem on a set of
+    points using lazy constraints.   The base MIP model only includes
+    'degree-2' constraints, requiring each node to have exactly
+    two incident edges.  Solutions to this model may contain subtours -
+    tours that don't visit every city.  The lazy constraint callback
+    adds new constraints to cut them off.
+
+    Solves the Euclidan TSP problem to optimality using the MIP formulation
     with lazy subtour elimination constraint generation.
-    :param points: list of (x, y) coordinate 
-    :return: 
+    :param points: list of (x, y) coordinate
+    :return:
     """
 
     n = len(points)
@@ -119,3 +122,33 @@ def solve_all_gurobi(dataset):
         result = solve_euclidian_tsp(instance)
         results.append(result)
     return results
+
+
+if __name__ == "__main__":
+    parser = argparse.ArgumentParser(description="Compute (near-)opt solution.")
+    parser.add_argument('--baseline', type=str, default='gurobi', choices=['gurobi', 'lkh3', 'concorde', 'farthest_insertion'], help="which baseline to use")
+    parser.add_argument('--path', type=str, default="../../data/TSP", help='Dataset file')
+    parser.add_argument('--offset', type=int, default=0, help='Offset where to start in dataset (default 0)')
+    parser.add_argument('--timelimit', type=int, default=0, help='time limit for baselone')
+    parser.add_argument('--num_samples', type=int, default=10000, help='Number of samples to evaluate (default 10000)')
+
+    args = parser.parse_args()
+
+    # Note: we only solve [0:10000] instances for testing
+    file_names = glob.glob(os.path.join(args.path, "*.pkl"))
+    for file_name in file_names:
+        data = load_dataset(file_name)
+        print(">> {}: Solving dataset {}".format(args.baseline, file_name))
+        start_time = time.time()
+        if args.baseline == "gurobi":
+            res = solve_all_gurobi(data[args.offset:args.offset+args.num_samples])  # [(obj, route), ...]
+            print(">> Completed within {}s".format(time.time() - start_time))
+            # save the results
+            path = os.path.join(args.path, args.baseline)
+            if not os.path.exists(path):
+                os.makedirs(path)
+            path = os.path.join(path, os.path.split(file_name)[-1])
+            with open(path, "wb") as f:
+                pickle.dump(res, f, pickle.HIGHEST_PROTOCOL)
+        else:
+            raise NotImplementedError

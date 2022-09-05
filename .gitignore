@@ -14,6 +14,8 @@ __pycache__/
 # data & pretrain-model
 AM/
 result/
+backup/
+data/
 
 # private files
 utils_plot*
