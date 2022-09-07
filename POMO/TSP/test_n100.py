@@ -43,13 +43,13 @@ tester_params = {
     'augmentation_enable': True,
     'aug_factor': 8,
     'aug_batch_size': 100,
-    'test_set_path': '',
+    'test_set_path': '../../data/TSP/tsp100_cluster.pkl',
     'fine_tune_params': {
-        'enable': False,  # evaluate few-shot generalization
+        'enable': True,  # evaluate few-shot generalization
         'fine_tune_episodes': 3000,  # how many data used to fine-tune the pretrained model
         'k': 50,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'fine_tune_batch_size': 64,  # the batch size of the inner-loop optimization
-        'fine_tune_set_path': '',
+        'fine_tune_set_path': '../../data/TSP/tsp100_cluster.pkl',
         'augmentation_enable': False,
         'optimizer': {
             'lr': 1e-4 * 0.1,
@@ -62,7 +62,7 @@ if tester_params['augmentation_enable']:
 
 logger_params = {
     'log_file': {
-        'desc': 'test__tsp100_longTrain',
+        'desc': 'test_tsp_n100',
         'filename': 'log.txt'
     }
 }
@@ -99,6 +99,6 @@ def _print_config():
 
 
 if __name__ == "__main__":
-    # TODO: 1. generate testing dataset with optimal solution
+    # TODO: 1. why not use test dataset to fine-tune the model?
     #  2. the implementation of our method
     main()

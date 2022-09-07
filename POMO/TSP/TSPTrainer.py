@@ -10,6 +10,7 @@ from torch.optim.lr_scheduler import MultiStepLR as Scheduler
 from TSProblemDef import get_random_problems, generate_task_set
 
 from utils.utils import *
+from utils.functions import load_dataset
 
 
 class TSPTrainer:
@@ -76,10 +77,14 @@ class TSPTrainer:
             self.result_log.append('train_score', epoch, train_score)
             self.result_log.append('train_loss', epoch, train_loss)
 
+            # Val
+            if epoch % self.trainer_params['val_interval'] == 0:
+                self._fast_val()
+
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.trainer_params['epochs'])
-            self.logger.info("Epoch {:3d}/{:3d}: Time Est.: Elapsed[{}], Remain[{}]".format(
-                epoch, self.trainer_params['epochs'], elapsed_time_str, remain_time_str))
+            self.logger.info("Epoch {:3d}/{:3d}({:.2f}%): Time Est.: Elapsed[{}], Remain[{}]".format(
+                epoch, self.trainer_params['epochs'], epoch/self.trainer_params['epochs']*100, elapsed_time_str, remain_time_str))
 
             all_done = (epoch == self.trainer_params['epochs'])
             model_save_interval = self.trainer_params['logging']['model_save_interval']
@@ -199,3 +204,33 @@ class TSPTrainer:
         loss_mean.backward()
         self.optimizer.step()
         return score_mean.item(), loss_mean.item()
+
+    def _fast_val(self):
+        val_path = "../../data/TSP/tsp100_tsplib.pkl"
+        val_episodes = 5000
+        aug_factor = 1
+        data = torch.Tensor(load_dataset(val_path)[: val_episodes])
+        env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
+
+        self.model.eval()
+        batch_size = data.size(0)
+        with torch.no_grad():
+            env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
+            reset_state, _, _ = env.reset()
+            self.model.pre_forward(reset_state)
+
+        state, reward, done = env.pre_step()
+        while not done:
+            selected, _ = self.model(state)
+            # shape: (batch, pomo)
+            state, reward, done = env.step(selected)
+
+        # Return
+        aug_reward = reward.reshape(aug_factor, batch_size, env.pomo_size)
+        # shape: (augmentation, batch, pomo)
+
+        max_pomo_reward, _ = aug_reward.max(dim=2)  # get best results from pomo
+        # shape: (augmentation, batch)
+        no_aug_score = -max_pomo_reward[0, :].float().mean()  # negative sign to make positive value
+
+        print(">> validation results: {}".format(no_aug_score.item()))

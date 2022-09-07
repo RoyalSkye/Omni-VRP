@@ -119,7 +119,8 @@ def solve_all_gurobi(dataset):
     results = []
     for i, instance in enumerate(dataset):
         print("Solving instance {}".format(i))
-        result = solve_euclidian_tsp(instance)
+        # some hard instances may take prohibitively long time, and ultimately kill the solver, so we set tl=1800s for TSP100 to avoid that.
+        result = solve_euclidian_tsp(instance, timeout=1800)
         results.append(result)
     return results
 
@@ -129,7 +130,7 @@ if __name__ == "__main__":
     parser.add_argument('--baseline', type=str, default='gurobi', choices=['gurobi', 'lkh3', 'concorde', 'farthest_insertion'], help="which baseline to use")
     parser.add_argument('--path', type=str, default="../../data/TSP", help='Dataset file')
     parser.add_argument('--offset', type=int, default=0, help='Offset where to start in dataset (default 0)')
-    parser.add_argument('--timelimit', type=int, default=0, help='time limit for baselone')
+    parser.add_argument('--timelimit', type=int, default=0, help='(total) time limit for baseline')
     parser.add_argument('--num_samples', type=int, default=10000, help='Number of samples to evaluate (default 10000)')
 
     args = parser.parse_args()

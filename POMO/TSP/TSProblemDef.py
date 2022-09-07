@@ -232,6 +232,7 @@ if __name__ == "__main__":
         get_random_problems(20000, 100, distribution=dist, path=path)
 
     # data = generate_gaussian_mixture_tsp(dataset_size=64, graph_size=100, num_modes=1, cdist=1)
+    # data = load_dataset("../../data/TSP/tsp100_cluster.pkl")
     # print(type(data), data.size(), data)
-    # x, y = data[0, :, 0].tolist(), data[0, :, -1].tolist()
+    # x, y = data[9215, :, 0].tolist(), data[9215, :, -1].tolist()
     # show([x], [y], label=["Gaussian Mixture"], title="TSP100", xdes="x", ydes="y", path="./tsp.pdf")

@@ -45,8 +45,12 @@ class TSPTester:
         self.optimizer = Optimizer(self.model.parameters(), **self.tester_params['fine_tune_params']['optimizer'])
 
         # load dataset
-        self.test_data = load_dataset(tester_params['test_set_path'])
-        self.fine_tune_data = load_dataset(self.fine_tune_params['fine_tune_set_path']) if self.fine_tune_set_path['enable'] else None
+        self.test_data = load_dataset(tester_params['test_set_path'])[: self.tester_params['test_episodes']]
+        if self.fine_tune_params['enable']:
+            start = tester_params['test_episodes'] if self.tester_params['test_set_path'] == self.fine_tune_params['fine_tune_set_path'] else 0
+            self.fine_tune_data = load_dataset(self.fine_tune_params['fine_tune_set_path'])[start: start+self.fine_tune_params['fine_tune_episodes']]
+        else:
+            self.fine_tune_data = None
 
         # Restore
         model_load = tester_params['model_load']
@@ -146,6 +150,7 @@ class TSPTester:
         aug_score_list.append(aug_score)
 
         for k in range(self.fine_tune_params['k']):
+            self.logger.info("Start fine-tune step {}".format(k+1))
             episode = 0
             while episode < fine_tune_episode:
                 remaining = fine_tune_episode - episode
@@ -183,14 +188,14 @@ class TSPTester:
             prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
 
         # Loss
-        aug_reward = reward.reshape(aug_factor, batch_size, self.env.pomo_size).transpose(1, 0, 2).view(batch_size, -1)
+        aug_reward = reward.reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
         # shape: (batch, augmentation * pomo)
         advantage = aug_reward - aug_reward.float().mean(dim=1, keepdims=True)
         # shape: (batch, augmentation * pomo)
-        log_prob = prob_list.log().sum(dim=2).reshape(aug_factor, batch_size, self.env.pomo_size).transpose(1, 0, 2).view(batch_size, -1)
+        log_prob = prob_list.log().sum(dim=2).reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
         # size = (batch, augmentation * pomo)
         loss = -advantage * log_prob  # Minus Sign: To Increase REWARD
-        # shape: (batch, augmentation * pomo)
+        # shape: (batch, augmentation * pomo)pretra
         loss_mean = loss.mean()
 
         # Score

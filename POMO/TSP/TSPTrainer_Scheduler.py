@@ -2,6 +2,7 @@ import copy
 import math
 import random
 import torch
+import torch.nn as nn
 from logging import getLogger
 
 from TSPEnv import TSPEnv as Env
@@ -15,9 +16,20 @@ from utils.utils import *
 from utils.functions import load_dataset
 
 
+class Scheduler(nn.Module):
+    """
+    Implementation of a learnable task scheduler.
+    """
+    def __init__(self, ):
+        pass
+
+    def forward(self, input):
+        pass
+
+
 class TSPTrainer:
     """
-    Implementation of POMO with Reptile.
+    Implementation of POMO with a learnable task scheduler.
     """
     def __init__(self,
                  env_params,
@@ -50,7 +62,6 @@ class TSPTrainer:
 
         # Main Components
         self.meta_model = Model(**self.model_params)
-        self.alpha = self.meta_params['alpha']
         self.task_set = generate_task_set(self.meta_params)
         assert self.trainer_params['meta_params']['epochs'] == math.ceil((1000 * 100000) / (
                     self.trainer_params['meta_params']['B'] * self.trainer_params['meta_params']['k'] *
@@ -79,14 +90,7 @@ class TSPTrainer:
             self.logger.info('=================================================================')
 
             # Train
-            if self.meta_params['meta_method'] == 'maml':
-                pass
-            elif self.meta_params['meta_method'] == 'fomaml':
-                pass
-            elif self.meta_params['meta_method'] == 'reptile':
-                train_score, train_loss = self._train_one_epoch(epoch)
-            else:
-                raise NotImplementedError
+            train_score, train_loss = self._train_one_epoch(epoch)
             self.result_log.append('train_score', epoch, train_score)
             self.result_log.append('train_loss', epoch, train_loss)
 
@@ -96,8 +100,8 @@ class TSPTrainer:
 
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.meta_params['epochs'])
-            self.logger.info("Epoch {:3d}/{:3d}({:.2f}%): Time Est.: Elapsed[{}], Remain[{}]".format(
-                epoch, self.meta_params['epochs'], epoch/self.meta_params['epochs']*100, elapsed_time_str, remain_time_str))
+            self.logger.info("Epoch {:3d}/{:3d}: Time Est.: Elapsed[{}], Remain[{}]".format(
+                epoch, self.meta_params['epochs'], elapsed_time_str, remain_time_str))
 
             all_done = (epoch == self.meta_params['epochs'])
             model_save_interval = self.trainer_params['logging']['model_save_interval']
@@ -136,17 +140,21 @@ class TSPTrainer:
 
     def _train_one_epoch(self, epoch):
         """
-        1. Sample B training tasks from task distribution P(T)
-        2. for a batch of tasks T_i, do reptile -> \theta_i
-        3. update meta-model -> \theta_0
+        0. generate val task set for meta-model, need to re-generate to avoid overfitting
+        Get each task weights:
+            1. randomly sample P=6 training tasks to form a pool
+            2. for each task: do k=5 steps gradient updates (inner-loop) -> collect {}
+            3. forward pass through scheduler to get the weights w_i of each task
+        Update scheduler:
+        4. sample B=3 tasks based on the weights w_i
+        5.
+
+        Update meta-model:
+        7. backward pass through meta-model -> \theta_0
         """
         score_AM = AverageMeter()
         loss_AM = AverageMeter()
-
         batch_size = self.meta_params['meta_batch_size']
-        self._alpha_scheduler(epoch)
-        slow_weights = copy.deepcopy(self.meta_model.state_dict())
-        fast_weights = []
 
         for i in range(self.meta_params['B']):
             task_params = random.sample(self.task_set, 1)[0]  # uniformly sample a task
@@ -154,6 +162,8 @@ class TSPTrainer:
             optimizer = Optimizer(task_model.parameters(), **self.optimizer_params['optimizer'])
 
             for step in range(self.meta_params['k']):
+                if step == self.meta_params['k']:
+                    k_model = copy.deepcopy(task_model)
                 # generate task-specific data
                 if self.meta_params['data_type'] == 'distribution':
                     assert len(task_params) == 2
@@ -172,11 +182,8 @@ class TSPTrainer:
                 score_AM.update(avg_score, batch_size)
                 loss_AM.update(avg_loss, batch_size)
 
+            # compute the bmg: K-L divergence
             fast_weights.append(task_model.state_dict())
-
-        state_dict = {params_key: (slow_weights[params_key] + self.alpha * torch.mean(torch.stack([fast_weight[params_key] - slow_weights[params_key] for fast_weight in fast_weights], dim=0), dim=0))
-                      for params_key in slow_weights}
-        self.meta_model.load_state_dict(state_dict)
 
         # Log Once, for each epoch
         self.logger.info('Meta Iteration {:3d}: alpha: {:6f}, Score: {:.4f},  Loss: {:.4f}'.format(epoch, self.alpha, score_AM.avg, loss_AM.avg))
@@ -250,7 +257,4 @@ class TSPTrainer:
         # shape: (augmentation, batch)
         no_aug_score = -max_pomo_reward[0, :].float().mean()  # negative sign to make positive value
 
-        print(">> validation results: {}".format(no_aug_score.item()))
-
-    def _alpha_scheduler(self, iter):
-        self.alpha *= self.meta_params['alpha_decay']
+        print(">> validation results (no aug): {}".format(no_aug_score.item()))

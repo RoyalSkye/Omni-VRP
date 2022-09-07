@@ -7,6 +7,7 @@ from utils.utils import create_logger, copy_all_src
 from utils.functions import seed_everything
 from TSPTrainer import TSPTrainer as Trainer
 from TSPTrainer_Meta import TSPTrainer as Trainer_Meta
+from TSPTrainer_Scheduler import TSPTrainer as Trainer_Scheduler
 
 DEBUG_MODE = False
 USE_CUDA = not DEBUG_MODE and torch.cuda.is_available()
@@ -46,9 +47,10 @@ trainer_params = {
     'use_cuda': USE_CUDA,
     'cuda_device_num': CUDA_DEVICE_NUM,
     'seed': 1234,
-    'epochs': 1000,
+    'epochs': 1000,  # will be overridden if meta_params['enable'] is True
     'train_episodes': 100000,  # number of instances per epoch
     'train_batch_size': 64,
+    'val_interval': 10,
     'logging': {
         'model_save_interval': 100,
         'img_save_interval': 100,
@@ -69,21 +71,21 @@ trainer_params = {
     },
     'meta_params': {
         'enable': False,  # whether use meta-learning or not
-        'meta_method': 'reptile',  # choose from ['reptile', 'reptile_ats']
+        'meta_method': 'reptile',  # choose from ['maml', 'reptile', 'ours']
         'data_type': 'distribution',  # choose from ["size", "distribution", "size_distribution"]
         'epochs': 10417,  # the number of meta-model updates: (1000*100000) / (3*50*64)
         'B': 3,  # the number of tasks in a mini-batch
         'k': 50,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'meta_batch_size': 64,  # the batch size of the inner-loop optimization
         'num_task': 50,  # the number of tasks in the training task set
-        'alpha': 0.99,  # used for the outer-loop optimization of reptile
-        'alpha_decay': 0.999,
+        'alpha': 0.99,  # params for the outer-loop optimization of reptile
+        'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile
     }
 }
 
 logger_params = {
     'log_file': {
-        'desc': 'train__tsp_n100__3000epoch',
+        'desc': 'train_tsp_n100',
         'filename': 'log.txt'
     }
 }
@@ -101,9 +103,14 @@ def main():
     if not trainer_params['meta_params']['enable']:
         print(">> Start POMO Training.")
         trainer = Trainer(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
-    else:
-        print(">> Start POMO-Meta Training.")
+    elif trainer_params['meta_params']['meta_method'] in ['maml', 'fomaml', 'reptile']:
+        print(">> Start POMO-{} Training.".format(trainer_params['meta_params']['meta_method']))
         trainer = Trainer_Meta(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
+    elif trainer_params['meta_params']['meta_method'] == 'ours':
+        print(">> Start POMO-Ours Training.")
+        trainer = Trainer_Scheduler(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
+    else:
+        raise NotImplementedError
 
     copy_all_src(trainer.result_folder)
 
