@@ -79,7 +79,9 @@ class TSPTrainer:
 
             # Val
             if epoch % self.trainer_params['val_interval'] == 0:
-                self._fast_val()
+                val_episodes = 1000
+                no_aug_score = self._fast_val(self.model, val_episodes=val_episodes)
+                print(">> validation results: {} over {} instances".format(no_aug_score, val_episodes))
 
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.trainer_params['epochs'])
@@ -148,8 +150,8 @@ class TSPTrainer:
                 raise NotImplementedError
             env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
             avg_score, avg_loss = self._train_one_batch(data, Env(**env_params))
-            score_AM.update(avg_score, batch_size)
-            loss_AM.update(avg_loss, batch_size)
+            score_AM.update(avg_score.item(), batch_size)
+            loss_AM.update(avg_loss.item(), batch_size)
 
             episode += batch_size
 
@@ -200,37 +202,37 @@ class TSPTrainer:
         score_mean = -max_pomo_reward.float().mean()  # negative sign to make positive value
 
         # Step & Return
-        self.model.zero_grad()
+        self.optimizer.zero_grad()
         loss_mean.backward()
         self.optimizer.step()
-        return score_mean.item(), loss_mean.item()
 
-    def _fast_val(self):
-        val_path = "../../data/TSP/tsp100_tsplib.pkl"
-        val_episodes = 5000
+        return score_mean, loss_mean
+
+    def _fast_val(self, model, data=None, val_episodes=1000):
         aug_factor = 1
-        data = torch.Tensor(load_dataset(val_path)[: val_episodes])
+        if data is None:
+            val_path = "../../data/TSP/tsp100_tsplib.pkl"
+            data = torch.Tensor(load_dataset(val_path)[: val_episodes])
         env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
 
-        self.model.eval()
+        model.eval()
         batch_size = data.size(0)
         with torch.no_grad():
             env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
             reset_state, _, _ = env.reset()
-            self.model.pre_forward(reset_state)
+            model.pre_forward(reset_state)
 
         state, reward, done = env.pre_step()
         while not done:
-            selected, _ = self.model(state)
+            selected, _ = model(state)
             # shape: (batch, pomo)
             state, reward, done = env.step(selected)
 
         # Return
         aug_reward = reward.reshape(aug_factor, batch_size, env.pomo_size)
         # shape: (augmentation, batch, pomo)
-
         max_pomo_reward, _ = aug_reward.max(dim=2)  # get best results from pomo
         # shape: (augmentation, batch)
         no_aug_score = -max_pomo_reward[0, :].float().mean()  # negative sign to make positive value
 
-        print(">> validation results: {}".format(no_aug_score.item()))
+        return no_aug_score.item()

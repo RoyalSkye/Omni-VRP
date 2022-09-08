@@ -203,6 +203,6 @@ class TSPTester:
         score_mean = -max_pomo_reward.float().mean()  # negative sign to make positive value
 
         # Step & Return
-        self.model.zero_grad()
+        self.optimizer.zero_grad()
         loss_mean.backward()
         self.optimizer.step()

@@ -38,23 +38,19 @@ class TSPModel(nn.Module):
             probs = self.decoder(encoded_last_node, ninf_mask=state.ninf_mask)
             # shape: (batch, pomo, problem)
 
-            if self.training or self.model_params['eval_type'] == 'softmax':
-                while True:
-                    selected = probs.reshape(batch_size * pomo_size, -1).multinomial(1) \
-                        .squeeze(dim=1).reshape(batch_size, pomo_size)
+            while True:
+                if self.training or self.model_params['eval_type'] == 'softmax':
+                    selected = probs.reshape(batch_size * pomo_size, -1).multinomial(1).squeeze(dim=1).reshape(batch_size, pomo_size)
+                    # shape: (batch, pomo)
+                else:
+                    selected = probs.argmax(dim=2)
                     # shape: (batch, pomo)
 
-                    prob = probs[state.BATCH_IDX, state.POMO_IDX, selected] \
-                        .reshape(batch_size, pomo_size)
-                    # shape: (batch, pomo)
-
-                    if (prob != 0).all():
-                        break
-
-            else:
-                selected = probs.argmax(dim=2)
+                prob = probs[state.BATCH_IDX, state.POMO_IDX, selected].reshape(batch_size, pomo_size)
                 # shape: (batch, pomo)
-                prob = None
+
+                if (prob != 0).all():
+                    break
 
         return selected, prob
 

@@ -70,12 +70,12 @@ trainer_params = {
 
     },
     'meta_params': {
-        'enable': False,  # whether use meta-learning or not
-        'meta_method': 'reptile',  # choose from ['maml', 'reptile', 'ours']
+        'enable': True,  # whether use meta-learning or not
+        'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile', 'ours']
         'data_type': 'distribution',  # choose from ["size", "distribution", "size_distribution"]
-        'epochs': 10417,  # the number of meta-model updates: (1000*100000) / (3*50*64)
+        'epochs': 104167,  # the number of meta-model updates: (1000*100000) / (3*50*64)
         'B': 3,  # the number of tasks in a mini-batch
-        'k': 50,  # gradient decent steps in the inner-loop optimization of meta-learning method
+        'k': 5,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'meta_batch_size': 64,  # the batch size of the inner-loop optimization
         'num_task': 50,  # the number of tasks in the training task set
         'alpha': 0.99,  # params for the outer-loop optimization of reptile

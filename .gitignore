@@ -12,10 +12,9 @@ __pycache__/
 .idea/
 
 # data & pretrain-model
-AM/
-result/
 backup/
 data/
+pretrained/
 
 # private files
 utils_plot*
