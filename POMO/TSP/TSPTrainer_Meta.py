@@ -53,10 +53,9 @@ class TSPTrainer:
 
         # Main Components
         self.meta_model = Model(**self.model_params)
-        self.meta_optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.alpha = self.meta_params['alpha']  # for reptile
         self.task_set = generate_task_set(self.meta_params)
-        assert self.trainer_params['meta_params']['epochs'] == math.ceil((1000 * 100000) / (
+        assert self.trainer_params['meta_params']['epochs'] == math.ceil((self.trainer_params['epochs'] * self.trainer_params['train_episodes']) / (
                     self.trainer_params['meta_params']['B'] * self.trainer_params['meta_params']['k'] *
                     self.trainer_params['meta_params']['meta_batch_size'])), ">> meta-learning iteration does not match with POMO!"
 
@@ -79,6 +78,7 @@ class TSPTrainer:
     def run(self):
 
         self.time_estimator.reset(self.start_epoch)
+        val_res = []
         for epoch in range(self.start_epoch, self.meta_params['epochs']+1):
             self.logger.info('=================================================================')
 
@@ -86,12 +86,6 @@ class TSPTrainer:
             train_score, train_loss = self._train_one_epoch(epoch)
             self.result_log.append('train_score', epoch, train_score)
             self.result_log.append('train_loss', epoch, train_loss)
-
-            # Val
-            if epoch % self.trainer_params['val_interval'] == 0:
-                val_episodes = 1000
-                no_aug_score = self._fast_val(self.meta_model, val_episodes=val_episodes)
-                print(">> validation results: {} over {} instances".format(no_aug_score, val_episodes))
 
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.meta_params['epochs'])
@@ -111,6 +105,12 @@ class TSPTrainer:
                                     self.result_log, labels=['train_loss'])
 
             if all_done or (epoch % model_save_interval) == 0:
+                # val
+                val_episodes = 256
+                _, no_aug_score = self._fast_val(copy.deepcopy(self.meta_model), val_episodes=val_episodes)
+                val_res.append(no_aug_score)
+                print(">> validation results: {} over {} instances".format(no_aug_score, val_episodes))
+                # save checkpoint
                 self.logger.info("Saving trained_model")
                 checkpoint_dict = {
                     'epoch': epoch,
@@ -132,6 +132,7 @@ class TSPTrainer:
                 self.logger.info(" *** Training Done *** ")
                 self.logger.info("Now, printing log array...")
                 util_print_log_array(self.logger, self.result_log)
+                print(val_res)
 
     def _train_one_epoch(self, epoch):
         """
@@ -168,17 +169,15 @@ class TSPTrainer:
 
                 if step == self.meta_params['k']: continue
                 env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
-                avg_score, avg_loss = self._train_one_batch(task_model, data, Env(**env_params))
+                avg_score, avg_loss = self._train_one_batch(step, task_model, data, Env(**env_params))
                 score_AM.update(avg_score.item(), batch_size)
                 loss_AM.update(avg_loss.item(), batch_size)
 
             if self.meta_params['meta_method'] == 'maml':
                 # cal loss on query(val) set - data
-                # val_loss += self._fast_val(task_model, val_episodes=64)
-                val_loss += self._fast_val(task_model, data=data)
+                val_loss += self._fast_val(task_model, data=data)[0]
             elif self.meta_params['meta_method'] == 'fomaml':
-                loss, _ = self._fast_val(task_model, data=data)
-                val_loss += loss
+                val_loss = self._fast_val(task_model, data=data)[0]
                 task_model.train()
                 grad = torch.autograd.grad(val_loss, task_model.parameters())
                 fomaml_grad.append(grad)
@@ -188,14 +187,17 @@ class TSPTrainer:
         # update meta-model
         if self.meta_params['meta_method'] == 'maml':
             val_loss = val_loss / self.meta_params['B']
-            self.meta_optimizer.zero_grad()
-            val_loss.backward()
-            self.meta_optimizer.step()
+            gradients = torch.autograd.grad(val_loss, self.maml)
+            updated_weights = OrderedDict(
+                (name, param - self.optimizer_params['optimizer']['lr'] * grad)
+                for ((name, param), grad) in zip(self.meta_model.state_dict().items(), gradients)
+            )
+            self.meta_model.load_state_dict(updated_weights)
         elif self.meta_params['meta_method'] == 'fomaml':
             updated_weights = self.meta_model.state_dict()
             for gradients in fomaml_grad:
                 updated_weights = OrderedDict(
-                    (name, param - self.optimizer_params['optimizer']['lr'] * grad)
+                    (name, param - self.optimizer_params['optimizer']['lr'] / self.meta_params['B'] * grad)
                     for ((name, param), grad) in zip(updated_weights.items(), gradients)
                 )
             self.meta_model.load_state_dict(updated_weights)
@@ -208,9 +210,8 @@ class TSPTrainer:
 
         return score_AM.avg, loss_AM.avg
 
-    def _train_one_batch(self, task_model, data, env):
+    def _train_one_batch(self, i, task_model, data, env):
 
-        # Prep
         task_model.train()
         batch_size = data.size(0)
         env.load_problems(batch_size, problems=data, aug_factor=1)
@@ -242,7 +243,11 @@ class TSPTrainer:
 
         # update model
         create_graph = True if self.meta_params['meta_method'] == 'maml' else False
-        gradients = torch.autograd.grad(loss_mean, task_model.parameters(), create_graph=create_graph)
+        if i == 0:
+            self.maml = list(task_model.parameters())
+            gradients = torch.autograd.grad(loss_mean, self.maml, create_graph=create_graph)
+        else:
+            gradients = torch.autograd.grad(loss_mean, task_model.parameters(), create_graph=create_graph)
         fast_weights = OrderedDict(
             (name, param - self.optimizer_params['optimizer']['lr'] * grad)
             for ((name, param), grad) in zip(task_model.state_dict().items(), gradients)
@@ -251,10 +256,10 @@ class TSPTrainer:
 
         return score_mean, loss_mean
 
-    def _fast_val(self, model, data=None, val_episodes=1000):
+    def _fast_val(self, model, data=None, val_episodes=256):
         aug_factor = 1
         if data is None:
-            val_path = "../../data/TSP/tsp100_tsplib.pkl"
+            val_path = "../../data/TSP/tsp50_tsplib.pkl"
             data = torch.Tensor(load_dataset(val_path)[: val_episodes])
         env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
 
@@ -286,7 +291,7 @@ class TSPTrainer:
         # shape: (augmentation, batch)
         no_aug_score = -max_pomo_reward[0, :].float().mean()  # negative sign to make positive value
 
-        return loss_mean, no_aug_score.item()
+        return loss_mean, no_aug_score.detach().item()
 
     def _alpha_scheduler(self, iter):
-        self.alpha *= self.meta_params['alpha_decay']
+        self.alpha = max(self.alpha * self.meta_params['alpha_decay'], 0.0001)

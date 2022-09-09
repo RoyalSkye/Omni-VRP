@@ -225,6 +225,8 @@ if __name__ == "__main__":
     test seed: 2023
     """
     path = "../../data/TSP"
+    if not os.path.exists(path):
+        os.makedirs(path)
     seed_everything(seed=2023)
 
     for dist in ["uniform", "uniform_rectangle", "gaussian", "cluster", "diagonal", "tsplib"]:

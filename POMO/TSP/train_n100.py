@@ -17,8 +17,8 @@ CUDA_DEVICE_NUM = 0  # $ nohup python -u train_n100.py 2>&1 &, no need to use CU
 # parameters
 
 env_params = {
-    'problem_size': 100,
-    'pomo_size': 100,
+    'problem_size': 50,
+    'pomo_size': 50,
 }
 
 model_params = {
@@ -47,13 +47,12 @@ trainer_params = {
     'use_cuda': USE_CUDA,
     'cuda_device_num': CUDA_DEVICE_NUM,
     'seed': 1234,
-    'epochs': 1000,  # will be overridden if meta_params['enable'] is True
+    'epochs': 500,  # will be overridden if meta_params['enable'] is True
     'train_episodes': 100000,  # number of instances per epoch
     'train_batch_size': 64,
-    'val_interval': 10,
     'logging': {
-        'model_save_interval': 100,
-        'img_save_interval': 100,
+        'model_save_interval': 520,
+        'img_save_interval': 520,
         'log_image_params_1': {
             'json_foldername': 'log_image_style',
             'filename': 'general.json'
@@ -71,9 +70,9 @@ trainer_params = {
     },
     'meta_params': {
         'enable': True,  # whether use meta-learning or not
-        'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile', 'ours']
+        'meta_method': 'fomaml',  # choose from ['maml', 'fomaml', 'reptile', 'ours']
         'data_type': 'distribution',  # choose from ["size", "distribution", "size_distribution"]
-        'epochs': 104167,  # the number of meta-model updates: (1000*100000) / (3*50*64)
+        'epochs': 52084,  # the number of meta-model updates: (500*100000) / (3*50*64)
         'B': 3,  # the number of tasks in a mini-batch
         'k': 5,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'meta_batch_size': 64,  # the batch size of the inner-loop optimization
@@ -85,7 +84,7 @@ trainer_params = {
 
 logger_params = {
     'log_file': {
-        'desc': 'train_tsp_n100',
+        'desc': 'train_tsp_n50',
         'filename': 'log.txt'
     }
 }

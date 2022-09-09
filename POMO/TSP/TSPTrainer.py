@@ -1,3 +1,4 @@
+import copy
 import random
 import torch
 from logging import getLogger
@@ -77,12 +78,6 @@ class TSPTrainer:
             self.result_log.append('train_score', epoch, train_score)
             self.result_log.append('train_loss', epoch, train_loss)
 
-            # Val
-            if epoch % self.trainer_params['val_interval'] == 0:
-                val_episodes = 1000
-                no_aug_score = self._fast_val(self.model, val_episodes=val_episodes)
-                print(">> validation results: {} over {} instances".format(no_aug_score, val_episodes))
-
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.trainer_params['epochs'])
             self.logger.info("Epoch {:3d}/{:3d}({:.2f}%): Time Est.: Elapsed[{}], Remain[{}]".format(
@@ -101,6 +96,11 @@ class TSPTrainer:
                                     self.result_log, labels=['train_loss'])
 
             if all_done or (epoch % model_save_interval) == 0:
+                # val
+                val_episodes = 256
+                no_aug_score = self._fast_val(copy.deepcopy(self.model), val_episodes=val_episodes)
+                print(">> validation results: {} over {} instances".format(no_aug_score, val_episodes))
+                # save checkpoint
                 self.logger.info("Saving trained_model")
                 checkpoint_dict = {
                     'epoch': epoch,
@@ -148,6 +148,7 @@ class TSPTrainer:
                 data = get_random_problems(batch_size, problem_size=task_params[0], num_modes=task_params[1], cdist=task_params[-1], distribution='gaussian_mixture')
             else:
                 raise NotImplementedError
+
             env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
             avg_score, avg_loss = self._train_one_batch(data, Env(**env_params))
             score_AM.update(avg_score.item(), batch_size)
@@ -171,7 +172,6 @@ class TSPTrainer:
 
     def _train_one_batch(self, data, env):
 
-        # Prep
         self.model.train()
         batch_size = data.size(0)
         env.load_problems(batch_size, problems=data, aug_factor=1)
@@ -208,10 +208,10 @@ class TSPTrainer:
 
         return score_mean, loss_mean
 
-    def _fast_val(self, model, data=None, val_episodes=1000):
+    def _fast_val(self, model, data=None, val_episodes=256):
         aug_factor = 1
         if data is None:
-            val_path = "../../data/TSP/tsp100_tsplib.pkl"
+            val_path = "../../data/TSP/tsp50_tsplib.pkl"
             data = torch.Tensor(load_dataset(val_path)[: val_episodes])
         env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
 
