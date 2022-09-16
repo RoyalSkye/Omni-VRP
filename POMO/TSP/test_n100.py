@@ -15,8 +15,8 @@ CUDA_DEVICE_NUM = 0
 # parameters
 
 env_params = {
-    'problem_size': 100,
-    'pomo_size': 100,
+    'problem_size': 50,
+    'pomo_size': 50,
 }
 
 model_params = {
@@ -35,21 +35,22 @@ tester_params = {
     'cuda_device_num': CUDA_DEVICE_NUM,
     'seed': 2023,
     'model_load': {
-        'path': './result/saved_tsp100_model2_longTrain',  # directory path of pre-trained model and log files saved.
-        'epoch': 3100,  # epoch version of pre-trained model to laod.
+        'path': '../../pretrained/tsp50_exp1/pomo_k',  # directory path of pre-trained model and log files saved.
+        'epoch': 52084,  # epoch version of pre-trained model to laod.
     },
     'test_episodes': 10000,
     'test_batch_size': 10000,
     'augmentation_enable': True,
     'aug_factor': 8,
     'aug_batch_size': 100,
-    'test_set_path': '../../data/TSP/tsp100_cluster.pkl',
+    'test_set_path': '../../data/TSP/tsp50_cluster.pkl',
+    'test_set_opt_sol_path': '../../data/TSP/gurobi/tsp50_cluster.pkl',
     'fine_tune_params': {
         'enable': True,  # evaluate few-shot generalization
         'fine_tune_episodes': 3000,  # how many data used to fine-tune the pretrained model
         'k': 50,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'fine_tune_batch_size': 64,  # the batch size of the inner-loop optimization
-        'fine_tune_set_path': '../../data/TSP/tsp100_cluster.pkl',
+        'fine_tune_set_path': '../../data/TSP/tsp50_cluster.pkl',
         'augmentation_enable': False,
         'optimizer': {
             'lr': 1e-4 * 0.1,
@@ -62,7 +63,7 @@ if tester_params['augmentation_enable']:
 
 logger_params = {
     'log_file': {
-        'desc': 'test_tsp_n100',
+        'desc': 'test_tsp_n50',
         'filename': 'log.txt'
     }
 }

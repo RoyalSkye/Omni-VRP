@@ -6,6 +6,7 @@ import logging
 from utils.utils import create_logger, copy_all_src
 from utils.functions import seed_everything
 from TSPTrainer import TSPTrainer as Trainer
+from TSPTrainer_pomo import TSPTrainer as Trainer_Pomo
 from TSPTrainer_Meta import TSPTrainer as Trainer_Meta
 from TSPTrainer_Scheduler import TSPTrainer as Trainer_Scheduler
 
@@ -70,13 +71,13 @@ trainer_params = {
     },
     'meta_params': {
         'enable': True,  # whether use meta-learning or not
-        'meta_method': 'fomaml',  # choose from ['maml', 'fomaml', 'reptile', 'ours']
-        'data_type': 'distribution',  # choose from ["size", "distribution", "size_distribution"]
+        'meta_method': 'reptile',  # choose from ['maml', 'fomaml', 'reptile', 'ours']
+        'data_type': 'size',  # choose from ["size", "distribution", "size_distribution"]
         'epochs': 52084,  # the number of meta-model updates: (500*100000) / (3*50*64)
         'B': 3,  # the number of tasks in a mini-batch
-        'k': 5,  # gradient decent steps in the inner-loop optimization of meta-learning method
+        'k': 50,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'meta_batch_size': 64,  # the batch size of the inner-loop optimization
-        'num_task': 50,  # the number of tasks in the training task set
+        'num_task': 20,  # the number of tasks in the training task set
         'alpha': 0.99,  # params for the outer-loop optimization of reptile
         'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile
     }
@@ -101,7 +102,8 @@ def main():
 
     if not trainer_params['meta_params']['enable']:
         print(">> Start POMO Training.")
-        trainer = Trainer(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
+        # trainer = Trainer(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
+        trainer = Trainer_Pomo(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
     elif trainer_params['meta_params']['meta_method'] in ['maml', 'fomaml', 'reptile']:
         print(">> Start POMO-{} Training.".format(trainer_params['meta_params']['meta_method']))
         trainer = Trainer_Meta(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)

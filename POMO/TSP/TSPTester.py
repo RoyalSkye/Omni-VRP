@@ -46,6 +46,8 @@ class TSPTester:
 
         # load dataset
         self.test_data = load_dataset(tester_params['test_set_path'])[: self.tester_params['test_episodes']]
+        opt_sol = load_dataset(tester_params['test_set_opt_sol_path'])[: self.tester_params['test_episodes']]  # [(obj, route), ...]
+        self.opt_sol = [i[0] for i in opt_sol]
         if self.fine_tune_params['enable']:
             start = tester_params['test_episodes'] if self.tester_params['test_set_path'] == self.fine_tune_params['fine_tune_set_path'] else 0
             self.fine_tune_data = load_dataset(self.fine_tune_params['fine_tune_set_path'])[start: start+self.fine_tune_params['fine_tune_episodes']]
@@ -72,8 +74,8 @@ class TSPTester:
     def _test(self):
 
         self.time_estimator.reset()
-        score_AM = AverageMeter()
-        aug_score_AM = AverageMeter()
+        score_AM, gap_AM = AverageMeter(), AverageMeter()
+        aug_score_AM, aug_gap_AM = AverageMeter(), AverageMeter()
 
         test_num_episode = self.tester_params['test_episodes']
         assert len(self.test_data) == test_num_episode, "the number of test instances does not match!"
@@ -81,10 +83,15 @@ class TSPTester:
         while episode < test_num_episode:
             remaining = test_num_episode - episode
             batch_size = min(self.tester_params['test_batch_size'], remaining)
-            score, aug_score = self._test_one_batch(torch.Tensor(self.test_data[episode:episode + batch_size]))
+            score, aug_score, all_score, all_aug_score = self._test_one_batch(torch.Tensor(self.test_data[episode: episode + batch_size]))
+            opt_sol = self.opt_sol[episode: episode + batch_size]
             score_AM.update(score, batch_size)
             aug_score_AM.update(aug_score, batch_size)
             episode += batch_size
+            gap = [max(all_score[i].item() - opt_sol[i], 0) / opt_sol[i] * 100 for i in range(batch_size)]
+            aug_gap = [max(all_aug_score[i].item() - opt_sol[i], 0) / opt_sol[i] * 100 for i in range(batch_size)]
+            gap_AM.update(sum(gap)/batch_size, batch_size)
+            aug_gap_AM.update(sum(aug_gap)/batch_size, batch_size)
 
             ############################
             # Logs
@@ -97,10 +104,10 @@ class TSPTester:
 
             if all_done:
                 self.logger.info(" *** Test Done *** ")
-                self.logger.info(" NO-AUG SCORE: {:.4f} ".format(score_AM.avg))
-                self.logger.info(" AUGMENTATION SCORE: {:.4f} ".format(aug_score_AM.avg))
+                self.logger.info(" NO-AUG SCORE: {:.4f}, Gap: {:.4f} ".format(score_AM.avg, gap_AM.avg))
+                self.logger.info(" AUGMENTATION SCORE: {:.4f}, Gap: {:.4f} ".format(aug_score_AM.avg, aug_gap_AM.avg))
 
-        return score_AM.avg, aug_score_AM.avg
+        return score_AM.avg, aug_score_AM.avg, gap_AM.avg, aug_gap_AM.avg
 
     def _test_one_batch(self, test_data):
         # Augmentation
@@ -130,13 +137,15 @@ class TSPTester:
 
         max_pomo_reward, _ = aug_reward.max(dim=2)  # get best results from pomo
         # shape: (augmentation, batch)
-        no_aug_score = -max_pomo_reward[0, :].float().mean()  # negative sign to make positive value
+        no_aug_score = -max_pomo_reward[0, :].float()  # negative sign to make positive value
+        no_aug_score_mean = no_aug_score.mean()
 
         max_aug_pomo_reward, _ = max_pomo_reward.max(dim=0)  # get best results from augmentation
         # shape: (batch,)
-        aug_score = -max_aug_pomo_reward.float().mean()  # negative sign to make positive value
+        aug_score = -max_aug_pomo_reward.float()  # negative sign to make positive value
+        aug_score_mean = aug_score.mean()
 
-        return no_aug_score.item(), aug_score.item()
+        return no_aug_score_mean.item(), aug_score_mean.item(), no_aug_score, aug_score
 
     def _fine_tune_and_test(self):
         """
@@ -144,10 +153,10 @@ class TSPTester:
         """
         fine_tune_episode = self.fine_tune_params['fine_tune_episodes']
         assert len(self.fine_tune_data) == fine_tune_episode, "the number of fine-tune instances does not match!"
-        score_list, aug_score_list = [], []
-        score, aug_score = self._test()
-        score_list.append(score)
-        aug_score_list.append(aug_score)
+        score_list, aug_score_list, gap_list, aug_gap_list = [], [], [], []
+        score, aug_score, gap, aug_gap = self._test()
+        score_list.append(score); aug_score_list.append(aug_score)
+        gap_list.append(gap); aug_gap_list.append(aug_gap)
 
         for k in range(self.fine_tune_params['k']):
             self.logger.info("Start fine-tune step {}".format(k+1))
@@ -157,12 +166,15 @@ class TSPTester:
                 batch_size = min(self.fine_tune_params['fine_tune_batch_size'], remaining)
                 self._fine_tune_one_batch(torch.Tensor(self.fine_tune_data[episode:episode+batch_size]))
                 episode += batch_size
-            score, aug_score = self._test()
-            score_list.append(score)
-            aug_score_list.append(aug_score)
+            score, aug_score, gap, aug_gap = self._test()
+            score_list.append(score); aug_score_list.append(aug_score)
+            gap_list.append(gap); aug_gap_list.append(aug_gap)
 
+        print(self.tester_params['test_set_path'])
         print("Final score_list: {}".format(score_list))
         print("Final aug_score_list {}".format(aug_score_list))
+        print("Final gap_list: {}".format(gap_list))
+        print("Final aug_gap_list: {}".format(aug_gap_list))
 
     def _fine_tune_one_batch(self, fine_tune_data):
         # Augmentation

@@ -97,8 +97,8 @@ class TSPTrainer:
 
             if all_done or (epoch % model_save_interval) == 0:
                 # val
-                val_episodes = 256
-                no_aug_score = self._fast_val(copy.deepcopy(self.model), val_episodes=val_episodes)
+                val_episodes = 64
+                no_aug_score = self._fast_val(self.model, val_episodes=val_episodes)
                 print(">> validation results: {} over {} instances".format(no_aug_score, val_episodes))
                 # save checkpoint
                 self.logger.info("Saving trained_model")
@@ -208,7 +208,7 @@ class TSPTrainer:
 
         return score_mean, loss_mean
 
-    def _fast_val(self, model, data=None, val_episodes=256):
+    def _fast_val(self, model, data=None, val_episodes=64):
         aug_factor = 1
         if data is None:
             val_path = "../../data/TSP/tsp50_tsplib.pkl"
