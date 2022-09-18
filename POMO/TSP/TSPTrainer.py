@@ -77,6 +77,9 @@ class TSPTrainer:
             self.scheduler.step()  # LR Decay
             self.result_log.append('train_score', epoch, train_score)
             self.result_log.append('train_loss', epoch, train_loss)
+            # Val
+            no_aug_score = self._fast_val(self.model, val_episodes=64)
+            self.result_log.append('val_score', epoch, no_aug_score)
 
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.trainer_params['epochs'])
@@ -96,10 +99,6 @@ class TSPTrainer:
                                     self.result_log, labels=['train_loss'])
 
             if all_done or (epoch % model_save_interval) == 0:
-                # val
-                val_episodes = 64
-                no_aug_score = self._fast_val(self.model, val_episodes=val_episodes)
-                print(">> validation results: {} over {} instances".format(no_aug_score, val_episodes))
                 # save checkpoint
                 self.logger.info("Saving trained_model")
                 checkpoint_dict = {

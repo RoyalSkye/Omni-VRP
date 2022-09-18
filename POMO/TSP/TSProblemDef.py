@@ -229,9 +229,14 @@ if __name__ == "__main__":
         os.makedirs(path)
     seed_everything(seed=2023)
 
+    # var-dist test data
     for dist in ["uniform", "uniform_rectangle", "gaussian", "cluster", "diagonal", "tsplib"]:
         print(">> Generating TSP instances following {} distribution!".format(dist))
         get_random_problems(20000, 100, distribution=dist, path=path)
+
+    for s in [150, 200]:
+        print(">> Generating TSP instances of size {}!".format(s))
+        get_random_problems(20000, s, distribution="uniform", path=path)
 
     # data = generate_gaussian_mixture_tsp(dataset_size=64, graph_size=100, num_modes=1, cdist=1)
     # data = load_dataset("../../data/TSP/tsp100_cluster.pkl")

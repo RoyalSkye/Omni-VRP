@@ -1,5 +1,6 @@
 import copy
 import math
+import time
 import random
 import torch
 from logging import getLogger
@@ -55,9 +56,9 @@ class TSPTrainer:
         self.meta_model = Model(**self.model_params)
         self.alpha = self.meta_params['alpha']  # for reptile
         self.task_set = generate_task_set(self.meta_params)
-        assert self.trainer_params['meta_params']['epochs'] == math.ceil((self.trainer_params['epochs'] * self.trainer_params['train_episodes']) / (
-                    self.trainer_params['meta_params']['B'] * self.trainer_params['meta_params']['k'] *
-                    self.trainer_params['meta_params']['meta_batch_size'])), ">> meta-learning iteration does not match with POMO!"
+        # assert self.trainer_params['meta_params']['epochs'] == math.ceil((self.trainer_params['epochs'] * self.trainer_params['train_episodes']) / (
+        #             self.trainer_params['meta_params']['B'] * self.trainer_params['meta_params']['k'] *
+        #             self.trainer_params['meta_params']['meta_batch_size'])), ">> meta-learning iteration does not match with POMO!"
 
         # Restore
         self.start_epoch = 1
@@ -77,6 +78,7 @@ class TSPTrainer:
 
     def run(self):
 
+        start_time = time.time()
         self.time_estimator.reset(self.start_epoch)
         for epoch in range(self.start_epoch, self.meta_params['epochs']+1):
             self.logger.info('=================================================================')
@@ -94,7 +96,10 @@ class TSPTrainer:
             self.logger.info("Epoch {:3d}/{:3d}({:.2f}%): Time Est.: Elapsed[{}], Remain[{}], Val Score: {:.4f}".format(
                 epoch, self.meta_params['epochs'], epoch/self.meta_params['epochs']*100, elapsed_time_str, remain_time_str, no_aug_score))
 
-            all_done = (epoch == self.meta_params['epochs'])
+            if self.trainer_params['stop_criterion'] == "epochs":
+                all_done = (epoch == self.meta_params['epochs'])
+            else:
+                all_done = (time.time() - start_time) >= self.trainer_params['time_limit']
             model_save_interval = self.trainer_params['logging']['model_save_interval']
             img_save_interval = self.trainer_params['logging']['img_save_interval']
 

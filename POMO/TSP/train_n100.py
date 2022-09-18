@@ -48,7 +48,9 @@ trainer_params = {
     'use_cuda': USE_CUDA,
     'cuda_device_num': CUDA_DEVICE_NUM,
     'seed': 1234,
-    'epochs': 500,  # will be overridden if meta_params['enable'] is True
+    'epochs': 500,
+    'time_limit': 86400,
+    'stop_criterion': 'epochs',  # epochs or time
     'train_episodes': 100000,  # number of instances per epoch
     'train_batch_size': 64,
     'logging': {
