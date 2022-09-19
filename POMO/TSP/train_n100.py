@@ -8,11 +8,10 @@ from utils.functions import seed_everything
 from TSPTrainer import TSPTrainer as Trainer
 from TSPTrainer_pomo import TSPTrainer as Trainer_Pomo
 from TSPTrainer_Meta import TSPTrainer as Trainer_Meta
-from TSPTrainer_Scheduler import TSPTrainer as Trainer_Scheduler
 
 DEBUG_MODE = False
 USE_CUDA = not DEBUG_MODE and torch.cuda.is_available()
-CUDA_DEVICE_NUM = 0  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
+CUDA_DEVICE_NUM = 1  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
 
 ##########################################################################################
 # parameters
@@ -50,7 +49,7 @@ trainer_params = {
     'seed': 1234,
     'epochs': 500,
     'time_limit': 86400,
-    'stop_criterion': 'epochs',  # epochs or time
+    'stop_criterion': 'time',  # epochs or time
     'train_episodes': 100000,  # number of instances per epoch
     'train_batch_size': 64,
     'logging': {
@@ -71,15 +70,17 @@ trainer_params = {
         # 'epoch': 510,  # epoch version of pre-trained model to laod.
 
     },
+    # For fomaml, k needs to be small (1 or 2), but the performance is still inferior.
+    # For reptile, performance is quite well, however, after several iteration, the improvement in inner-loop is trivial.
     'meta_params': {
         'enable': True,  # whether use meta-learning or not
-        'meta_method': 'reptile',  # choose from ['maml', 'fomaml', 'reptile', 'ours']
+        'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile', 'ours']
         'data_type': 'size',  # choose from ["size", "distribution", "size_distribution"]
         'epochs': 52084,  # the number of meta-model updates: (500*100000) / (3*50*64)
-        'B': 3,  # the number of tasks in a mini-batch
-        'k': 50,  # gradient decent steps in the inner-loop optimization of meta-learning method
+        'B': 1,  # the number of tasks in a mini-batch
+        'k': 3,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'meta_batch_size': 64,  # the batch size of the inner-loop optimization
-        'num_task': 20,  # the number of tasks in the training task set
+        'num_task': 10,  # the number of tasks in the training task set
         'alpha': 0.99,  # params for the outer-loop optimization of reptile
         'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile
     }

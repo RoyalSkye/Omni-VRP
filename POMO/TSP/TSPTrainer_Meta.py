@@ -19,9 +19,12 @@ from utils.functions import load_dataset
 
 class TSPTrainer:
     """
+    TODO: 1. val data? and training data, for k steps of inner-loop, should we use the same batch of data?
+        2. only meta-update partial para of pomo?
     Implementation of POMO with MAML / FOMAML / Reptile.
     For MAML & FOMAML, ref to "Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks";
     For Reptile, ref to "On First-Order Meta-Learning Algorithms".
+    Refer to "https://lilianweng.github.io/posts/2018-11-30-meta-learning"
     """
     def __init__(self,
                  env_params,
@@ -54,6 +57,7 @@ class TSPTrainer:
 
         # Main Components
         self.meta_model = Model(**self.model_params)
+        self.meta_optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.alpha = self.meta_params['alpha']  # for reptile
         self.task_set = generate_task_set(self.meta_params)
         # assert self.trainer_params['meta_params']['epochs'] == math.ceil((self.trainer_params['epochs'] * self.trainer_params['train_episodes']) / (
@@ -88,7 +92,10 @@ class TSPTrainer:
             self.result_log.append('train_score', epoch, train_score)
             self.result_log.append('train_loss', epoch, train_loss)
             # Val
-            _, no_aug_score = self._fast_val(copy.deepcopy(self.meta_model), val_episodes=64)
+            if self.meta_params['meta_method'] in ['fomaml', 'reptile']:
+                no_aug_score = self._fast_val(copy.deepcopy(self.meta_model), val_episodes=32, mode="eval")
+            else:
+                no_aug_score = self._fast_val(self.meta_model, val_episodes=32, mode="eval")
             self.result_log.append('val_score', epoch, no_aug_score)
 
             # Logs & Checkpoint
@@ -140,45 +147,42 @@ class TSPTrainer:
         2. inner-loop: for a batch of tasks T_i, do reptile -> \theta_i
         3. outer-loop: update meta-model -> \theta_0
         """
+        self.meta_model.train()
         score_AM = AverageMeter()
         loss_AM = AverageMeter()
         batch_size = self.meta_params['meta_batch_size']
 
         self._alpha_scheduler(epoch)
-        slow_weights = copy.deepcopy(self.meta_model.state_dict())
         fast_weights, val_loss, fomaml_grad = [], 0, []
 
         # sample a batch of tasks
         for i in range(self.meta_params['B']):
             task_params = random.sample(self.task_set, 1)[0]
-            task_model = copy.deepcopy(self.meta_model)
+            if self.meta_params['meta_method'] in ['fomaml', 'reptile']:
+                task_model = copy.deepcopy(self.meta_model)
+                optimizer = Optimizer(task_model.parameters(), **self.optimizer_params['optimizer'])
+            elif self.meta_params['meta_method'] == 'maml':
+                fast_weight = OrderedDict(self.meta_model.named_parameters())
 
             for step in range(self.meta_params['k'] + 1):
                 # generate task-specific data
-                if self.meta_params['data_type'] == 'distribution':
-                    assert len(task_params) == 2
-                    data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[-1], distribution='gaussian_mixture')
-                elif self.meta_params['data_type'] == 'size':
-                    assert len(task_params) == 1
-                    data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform')
-                elif self.meta_params['data_type'] == "size_distribution":
-                    assert len(task_params) == 3
-                    data = get_random_problems(batch_size, problem_size=task_params[0], num_modes=task_params[1], cdist=task_params[-1], distribution='gaussian_mixture')
-                else:
-                    raise NotImplementedError
-
+                data = self._get_data(batch_size, task_params)
                 if step == self.meta_params['k']: continue
                 env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
-                avg_score, avg_loss = self._train_one_batch(step, task_model, data, Env(**env_params))
+
+                if self.meta_params['meta_method'] in ['reptile', 'fomaml']:
+                    avg_score, avg_loss = self._train_one_batch(task_model, data, Env(**env_params), optimizer)
+                elif self.meta_params['meta_method'] == 'maml':
+                    avg_score, avg_loss, fast_weight = self._train_one_batch_maml(fast_weight, data, Env(**env_params))
+
                 score_AM.update(avg_score.item(), batch_size)
                 loss_AM.update(avg_loss.item(), batch_size)
 
             if self.meta_params['meta_method'] == 'maml':
                 # cal loss on query(val) set - data
-                val_loss += self._fast_val(task_model, data=data)[0]
+                val_loss += self._fast_val(fast_weight, data=data, mode="maml")
             elif self.meta_params['meta_method'] == 'fomaml':
-                val_loss = self._fast_val(task_model, data=data)[0]
-                task_model.train()
+                val_loss = self._fast_val(task_model, data=data, mode="fomaml")
                 grad = torch.autograd.grad(val_loss, task_model.parameters())
                 fomaml_grad.append(grad)
             elif self.meta_params['meta_method'] == 'reptile':
@@ -186,13 +190,10 @@ class TSPTrainer:
 
         # update meta-model
         if self.meta_params['meta_method'] == 'maml':
-            val_loss = val_loss / self.meta_params['B']
-            gradients = torch.autograd.grad(val_loss, self.maml)
-            updated_weights = OrderedDict(
-                (name, param - self.optimizer_params['optimizer']['lr'] * grad)
-                for ((name, param), grad) in zip(self.meta_model.state_dict().items(), gradients)
-            )
-            self.meta_model.load_state_dict(updated_weights)
+            val_loss /= self.meta_params['B']
+            self.meta_optimizer.zero_grad()
+            val_loss.backward()
+            self.meta_optimizer.step()
         elif self.meta_params['meta_method'] == 'fomaml':
             updated_weights = self.meta_model.state_dict()
             for gradients in fomaml_grad:
@@ -202,7 +203,7 @@ class TSPTrainer:
                 )
             self.meta_model.load_state_dict(updated_weights)
         elif self.meta_params['meta_method'] == 'reptile':
-            state_dict = {params_key: (slow_weights[params_key] + self.alpha * torch.mean(torch.stack([fast_weight[params_key] - slow_weights[params_key] for fast_weight in fast_weights], dim=0), dim=0)) for params_key in slow_weights}
+            state_dict = {params_key: (self.meta_model.state_dict()[params_key] + self.alpha * torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights], dim=0), dim=0)) for params_key in self.meta_model.state_dict()}
             self.meta_model.load_state_dict(state_dict)
 
         # Log Once, for each epoch
@@ -210,7 +211,7 @@ class TSPTrainer:
 
         return score_AM.avg, loss_AM.avg
 
-    def _train_one_batch(self, i, task_model, data, env):
+    def _train_one_batch(self, task_model, data, env, optimizer):
 
         task_model.train()
         batch_size = data.size(0)
@@ -238,51 +239,101 @@ class TSPTrainer:
         loss_mean = loss.mean()
 
         # update model
-        create_graph = True if self.meta_params['meta_method'] == 'maml' else False
-        if i == 0:
-            self.maml = list(task_model.parameters())
-            gradients = torch.autograd.grad(loss_mean, self.maml, create_graph=create_graph)
-        else:
-            gradients = torch.autograd.grad(loss_mean, task_model.parameters(), create_graph=create_graph)
-        fast_weights = OrderedDict(
-            (name, param - self.optimizer_params['optimizer']['lr'] * grad)
-            for ((name, param), grad) in zip(task_model.state_dict().items(), gradients)
-        )
-        task_model.load_state_dict(fast_weights)
+        optimizer.zero_grad()
+        loss_mean.backward()
+        optimizer.step()
 
         # Score
         max_pomo_reward, _ = reward.max(dim=1)  # get best results from pomo
         score_mean = -max_pomo_reward.float().mean()  # negative sign to make positive value
+        print(score_mean)
 
         return score_mean, loss_mean
 
-    def _fast_val(self, model, data=None, val_episodes=64):
-        aug_factor = 1
-        if data is None:
-            val_path = "../../data/TSP/tsp50_tsplib.pkl"
-            data = torch.Tensor(load_dataset(val_path)[: val_episodes])
-        env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
+    def _train_one_batch_maml(self, fast_weight, data, env):
 
-        model.eval()
         batch_size = data.size(0)
-        with torch.enable_grad():
-            env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
-            reset_state, _, _ = env.reset()
-            model.pre_forward(reset_state)
-            prob_list = torch.zeros(size=(batch_size, env.pomo_size, 0))
+        env.load_problems(batch_size, problems=data, aug_factor=1)
+        reset_state, _, _ = env.reset()
+        self.meta_model.pre_forward(reset_state, weights=fast_weight)
+        prob_list = torch.zeros(size=(batch_size, env.pomo_size, 0))
+        # shape: (batch, pomo, 0~problem)
 
-            state, reward, done = env.pre_step()
-            while not done:
-                selected, prob = model(state)
-                # shape: (batch, pomo)
-                state, reward, done = env.step(selected)
-                prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
+        # POMO Rollout, please note that the reward is negative (i.e., -length of route).
+        state, reward, done = env.pre_step()
+        while not done:
+            selected, prob = self.meta_model(state, weights=fast_weight)
+            # shape: (batch, pomo)
+            state, reward, done = env.step(selected)
+            prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
 
         # Loss
         advantage = reward - reward.float().mean(dim=1, keepdims=True)
+        # shape: (batch, pomo)
         log_prob = prob_list.log().sum(dim=2)  # for the first/last node, p=1 -> log_p=0
+        # size = (batch, pomo)
         loss = -advantage * log_prob  # Minus Sign: To Increase REWARD
+        # shape: (batch, pomo)
         loss_mean = loss.mean()
+
+        # update model
+        gradients = torch.autograd.grad(loss_mean, fast_weight.values(), create_graph=True)
+        fast_weight = OrderedDict(
+            (name, param - self.optimizer_params['optimizer']['lr'] * grad)
+            for ((name, param), grad) in zip(fast_weight.items(), gradients)
+        )
+
+        # Score
+        max_pomo_reward, _ = reward.max(dim=1)  # get best results from pomo
+        score_mean = -max_pomo_reward.float().mean()  # negative sign to make positive value
+        print(score_mean)
+
+        return score_mean, loss_mean, fast_weight
+
+    def _fast_val(self, model, data=None, val_episodes=32, mode="eval"):
+        aug_factor = 1
+        if data is None:
+            val_path = "../../data/TSP/tsp150_uniform.pkl"
+            data = torch.Tensor(load_dataset(val_path)[: val_episodes])
+        env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
+
+        batch_size = data.size(0)
+        if mode == "eval":
+            model.eval()
+            with torch.no_grad():
+                env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
+                reset_state, _, _ = env.reset()
+                model.pre_forward(reset_state)
+            state, reward, done = env.pre_step()
+            while not done:
+                selected, _ = model(state)
+                # shape: (batch, pomo)
+                state, reward, done = env.step(selected)
+        elif mode in ["maml", "fomaml"]:
+            fast_weight = model
+            env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
+            reset_state, _, _ = env.reset()
+            if mode == "maml":
+                self.meta_model.pre_forward(reset_state, weights=fast_weight)
+            else:
+                model.pre_forward(reset_state)
+            prob_list = torch.zeros(size=(batch_size, env.pomo_size, 0))
+            state, reward, done = env.pre_step()
+            while not done:
+                if mode == "maml":
+                    selected, prob = self.meta_model(state, weights=fast_weight)
+                else:
+                    selected, prob = model(state)
+                # shape: (batch, pomo)
+                state, reward, done = env.step(selected)
+                prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
+            # Loss
+            advantage = reward - reward.float().mean(dim=1, keepdims=True)
+            log_prob = prob_list.log().sum(dim=2)  # for the first/last node, p=1 -> log_p=0
+            loss = -advantage * log_prob  # Minus Sign: To Increase REWARD
+            loss_mean = loss.mean()
+        else:
+            raise NotImplementedError
 
         # Return
         aug_reward = reward.reshape(aug_factor, batch_size, env.pomo_size)
@@ -291,7 +342,25 @@ class TSPTrainer:
         # shape: (augmentation, batch)
         no_aug_score = -max_pomo_reward[0, :].float().mean()  # negative sign to make positive value
 
-        return loss_mean, no_aug_score.detach().item()
+        if mode == "eval":
+            return no_aug_score.detach().item()
+        else:
+            return loss_mean
+
+    def _get_data(self, batch_size, task_params):
+        if self.meta_params['data_type'] == 'distribution':
+            assert len(task_params) == 2
+            data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[-1], distribution='gaussian_mixture')
+        elif self.meta_params['data_type'] == 'size':
+            assert len(task_params) == 1
+            data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform')
+        elif self.meta_params['data_type'] == "size_distribution":
+            assert len(task_params) == 3
+            data = get_random_problems(batch_size, problem_size=task_params[0], num_modes=task_params[1], cdist=task_params[-1], distribution='gaussian_mixture')
+        else:
+            raise NotImplementedError
+
+        return data
 
     def _alpha_scheduler(self, iter):
         self.alpha = max(self.alpha * self.meta_params['alpha_decay'], 0.0001)

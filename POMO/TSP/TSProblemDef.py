@@ -12,7 +12,7 @@ def generate_task_set(meta_params):
     if meta_params['data_type'] == "distribution":  # focus on the TSP100 with different distributions
         task_set = [(m, l) for l in [1, 10, 20, 30, 50] for m in range(1, 1 + meta_params['num_task'] // 5)] + [(0, 0)]
     elif meta_params['data_type'] == "size":  # focus on uniform distribution with different sizes
-        task_set = [(n,) for n in range(5, 5 + 5 * meta_params['num_task'], 5)]
+        task_set = [(n,) for n in range(10, 10 + 10 * meta_params['num_task'], 10)]
     elif meta_params['data_type'] == "size_distribution":
         task_set = [(m, l) for l in [1, 10, 20, 30, 50] for m in range(1, 11)] + [(0, 0)]
         task_set = [(n, m, l) for n in [25, 50, 75, 100, 125, 150] for (m, l) in task_set]

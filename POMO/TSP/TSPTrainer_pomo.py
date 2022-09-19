@@ -86,7 +86,7 @@ class TSPTrainer:
             self.result_log.append('train_score', epoch, train_score)
             self.result_log.append('train_loss', epoch, train_loss)
             # Val
-            no_aug_score = self._fast_val(self.meta_model, val_episodes=64)
+            no_aug_score = self._fast_val(self.meta_model, val_episodes=32)
             self.result_log.append('val_score', epoch, no_aug_score)
 
             # Logs & Checkpoint
@@ -138,6 +138,7 @@ class TSPTrainer:
         2. inner-loop: for a batch of tasks T_i, do reptile -> \theta_i
         3. outer-loop: update meta-model -> \theta_0
         """
+        self.meta_model.train()
         score_AM = AverageMeter()
         loss_AM = AverageMeter()
         batch_size = self.meta_params['meta_batch_size']
@@ -172,7 +173,6 @@ class TSPTrainer:
 
     def _train_one_batch(self, data, env):
 
-        self.meta_model.train()
         batch_size = data.size(0)
         env.load_problems(batch_size, problems=data, aug_factor=1)
         reset_state, _, _ = env.reset()
@@ -208,10 +208,10 @@ class TSPTrainer:
 
         return score_mean, loss_mean
 
-    def _fast_val(self, model, data=None, val_episodes=64):
+    def _fast_val(self, model, data=None, val_episodes=32):
         aug_factor = 1
         if data is None:
-            val_path = "../../data/TSP/tsp50_tsplib.pkl"
+            val_path = "../../data/TSP/tsp150_uniform.pkl"
             data = torch.Tensor(load_dataset(val_path)[: val_episodes])
         env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
 
