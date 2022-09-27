@@ -10,6 +10,7 @@ from TSPEnv import TSPEnv as Env
 from TSPModel import TSPModel as Model
 
 from torch.optim import Adam as Optimizer
+# from torch.optim import SGD as Optimizer
 from torch.optim.lr_scheduler import MultiStepLR as Scheduler
 from TSProblemDef import get_random_problems, generate_task_set
 
@@ -20,11 +21,11 @@ from utils.functions import load_dataset
 class TSPTrainer:
     """
     TODO: 1. val data? and training data, for k steps of inner-loop, should we use the same batch of data?
-        2. only meta-update partial para of pomo?
     Implementation of POMO with MAML / FOMAML / Reptile.
     For MAML & FOMAML, ref to "Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks";
     For Reptile, ref to "On First-Order Meta-Learning Algorithms".
     Refer to "https://lilianweng.github.io/posts/2018-11-30-meta-learning"
+    MAML's time and space complexity (i.e., GPU memory) is high, so we only update decoder in inner-loop (similar performance).
     """
     def __init__(self,
                  env_params,
@@ -60,9 +61,6 @@ class TSPTrainer:
         self.meta_optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.alpha = self.meta_params['alpha']  # for reptile
         self.task_set = generate_task_set(self.meta_params)
-        # assert self.trainer_params['meta_params']['epochs'] == math.ceil((self.trainer_params['epochs'] * self.trainer_params['train_episodes']) / (
-        #             self.trainer_params['meta_params']['B'] * self.trainer_params['meta_params']['k'] *
-        #             self.trainer_params['meta_params']['meta_batch_size'])), ">> meta-learning iteration does not match with POMO!"
 
         # Restore
         self.start_epoch = 1
@@ -139,7 +137,6 @@ class TSPTrainer:
                 self.logger.info(" *** Training Done *** ")
                 self.logger.info("Now, printing log array...")
                 util_print_log_array(self.logger, self.result_log)
-                print(val_res)
 
     def _train_one_epoch(self, epoch):
         """
@@ -162,7 +159,12 @@ class TSPTrainer:
                 task_model = copy.deepcopy(self.meta_model)
                 optimizer = Optimizer(task_model.parameters(), **self.optimizer_params['optimizer'])
             elif self.meta_params['meta_method'] == 'maml':
-                fast_weight = OrderedDict(self.meta_model.named_parameters())
+                if self.model_params['meta_update_encoder']:
+                    fast_weight = OrderedDict(self.meta_model.named_parameters())
+                else:
+                    fast_weight = OrderedDict(self.meta_model.decoder.named_parameters())
+                    for k in list(fast_weight.keys()):
+                        fast_weight["decoder."+k] = fast_weight.pop(k)
 
             for step in range(self.meta_params['k'] + 1):
                 # generate task-specific data
@@ -291,6 +293,7 @@ class TSPTrainer:
         return score_mean, loss_mean, fast_weight
 
     def _fast_val(self, model, data=None, val_episodes=32, mode="eval"):
+
         aug_factor = 1
         if data is None:
             val_path = "../../data/TSP/tsp150_uniform.pkl"
@@ -304,11 +307,11 @@ class TSPTrainer:
                 env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
                 reset_state, _, _ = env.reset()
                 model.pre_forward(reset_state)
-            state, reward, done = env.pre_step()
-            while not done:
-                selected, _ = model(state)
-                # shape: (batch, pomo)
-                state, reward, done = env.step(selected)
+                state, reward, done = env.pre_step()
+                while not done:
+                    selected, _ = model(state)
+                    # shape: (batch, pomo)
+                    state, reward, done = env.step(selected)
         elif mode in ["maml", "fomaml"]:
             fast_weight = model
             env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
@@ -328,7 +331,11 @@ class TSPTrainer:
                 state, reward, done = env.step(selected)
                 prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
             # Loss
-            advantage = reward - reward.float().mean(dim=1, keepdims=True)
+            if self.meta_params['bootstrap_steps'] != 0:
+                bootstrap_reward = self._bootstrap(fast_weight, data)
+                advantage = reward - bootstrap_reward
+            else:
+                advantage = reward - reward.float().mean(dim=1, keepdims=True)
             log_prob = prob_list.log().sum(dim=2)  # for the first/last node, p=1 -> log_p=0
             loss = -advantage * log_prob  # Minus Sign: To Increase REWARD
             loss_mean = loss.mean()
@@ -347,7 +354,48 @@ class TSPTrainer:
         else:
             return loss_mean
 
+    def _bootstrap(self, fast_weight, data):
+        """
+        Bootstrap using smaller lr;
+        Only support for MAML now.
+        """
+        bootstrap_weight = fast_weight
+        batch_size = data.size(0)
+        bootstrap_reward = torch.full((batch_size, 1), float("-inf"))
+        with torch.enable_grad():
+            for L in range(self.meta_params['bootstrap_steps']):
+                env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
+                env.load_problems(batch_size, problems=data, aug_factor=1)
+                reset_state, _, _ = env.reset()
+                self.meta_model.pre_forward(reset_state, weights=bootstrap_weight)
+                prob_list = torch.zeros(size=(batch_size, env.pomo_size, 0))
+                state, reward, done = env.pre_step()
+                while not done:
+                    selected, prob = self.meta_model(state, weights=bootstrap_weight)
+                    state, reward, done = env.step(selected)
+                    prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
+
+                advantage = reward - reward.float().mean(dim=1, keepdims=True)
+                log_prob = prob_list.log().sum(dim=2)
+                loss = -advantage * log_prob
+                loss_mean = loss.mean()
+
+                gradients = torch.autograd.grad(loss_mean, bootstrap_weight.values(), create_graph=False)
+                bootstrap_weight = OrderedDict(
+                    (name, param - self.optimizer_params['optimizer']['lr'] * grad)
+                    for ((name, param), grad) in zip(bootstrap_weight.items(), gradients)
+                )
+
+                max_pomo_reward, _ = reward.max(dim=1)
+                max_pomo_reward = max_pomo_reward.view(-1, 1)
+                bootstrap_reward = torch.where(max_pomo_reward > bootstrap_reward, max_pomo_reward, bootstrap_reward)
+                score_mean, bootstrap_mean = -max_pomo_reward.float().mean(), -bootstrap_reward.float().mean()
+                print("Bootstrap step {}: score_mean {}, bootstrap_mean {}".format(L, score_mean, bootstrap_mean))
+
+        return bootstrap_reward
+
     def _get_data(self, batch_size, task_params):
+
         if self.meta_params['data_type'] == 'distribution':
             assert len(task_params) == 2
             data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[-1], distribution='gaussian_mixture')
@@ -363,4 +411,7 @@ class TSPTrainer:
         return data
 
     def _alpha_scheduler(self, iter):
+        """
+        Update param for Reptile.
+        """
         self.alpha = max(self.alpha * self.meta_params['alpha_decay'], 0.0001)

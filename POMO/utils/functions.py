@@ -40,6 +40,13 @@ def seed_everything(seed=2022):
     torch.cuda.manual_seed_all(seed)
 
 
+def display_num_param(net):
+    nb_param = 0
+    for param in net.parameters():
+        nb_param += param.numel()
+    print('There are {} ({:.2f} million) parameters in this neural network'.format(nb_param, nb_param/1e6))
+
+
 def show(x, y, label, title, xdes, ydes, path, x_scale="linear", dpi=300):
     plt.style.use('fast')  # bmh, fivethirtyeight, Solarize_Light2
     plt.figure(figsize=(8, 8))

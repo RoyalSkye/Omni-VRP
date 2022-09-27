@@ -11,7 +11,7 @@ from TSPTrainer_Meta import TSPTrainer as Trainer_Meta
 
 DEBUG_MODE = False
 USE_CUDA = not DEBUG_MODE and torch.cuda.is_available()
-CUDA_DEVICE_NUM = 1  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
+CUDA_DEVICE_NUM = 0  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
 
 ##########################################################################################
 # parameters
@@ -30,6 +30,7 @@ model_params = {
     'logit_clipping': 10,
     'ff_hidden_dim': 512,
     'eval_type': 'argmax',
+    'meta_update_encoder': False,
 }
 
 optimizer_params = {
@@ -49,12 +50,12 @@ trainer_params = {
     'seed': 1234,
     'epochs': 500,
     'time_limit': 86400,
-    'stop_criterion': 'time',  # epochs or time
+    'stop_criterion': 'epochs',  # epochs or time
     'train_episodes': 100000,  # number of instances per epoch
     'train_batch_size': 64,
     'logging': {
-        'model_save_interval': 520,
-        'img_save_interval': 520,
+        'model_save_interval': 13020,
+        'img_save_interval': 13020,
         'log_image_params_1': {
             'json_foldername': 'log_image_style',
             'filename': 'general.json'
@@ -74,13 +75,14 @@ trainer_params = {
     # For reptile, performance is quite well, however, after several iteration, the improvement in inner-loop is trivial.
     'meta_params': {
         'enable': True,  # whether use meta-learning or not
-        'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile', 'ours']
+        'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile']
+        'bootstrap_steps': 1,
         'data_type': 'size',  # choose from ["size", "distribution", "size_distribution"]
-        'epochs': 52084,  # the number of meta-model updates: (500*100000) / (3*50*64)
+        'epochs': 130209,  # the number of meta-model updates: (250*100000) / (1*5*64)
         'B': 1,  # the number of tasks in a mini-batch
-        'k': 3,  # gradient decent steps in the inner-loop optimization of meta-learning method
+        'k': 1,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'meta_batch_size': 64,  # the batch size of the inner-loop optimization
-        'num_task': 10,  # the number of tasks in the training task set
+        'num_task': 5,  # the number of tasks in the training task set
         'alpha': 0.99,  # params for the outer-loop optimization of reptile
         'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile
     }
@@ -110,9 +112,6 @@ def main():
     elif trainer_params['meta_params']['meta_method'] in ['maml', 'fomaml', 'reptile']:
         print(">> Start POMO-{} Training.".format(trainer_params['meta_params']['meta_method']))
         trainer = Trainer_Meta(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
-    elif trainer_params['meta_params']['meta_method'] == 'ours':
-        print(">> Start POMO-Ours Training.")
-        trainer = Trainer_Scheduler(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
     else:
         raise NotImplementedError
 

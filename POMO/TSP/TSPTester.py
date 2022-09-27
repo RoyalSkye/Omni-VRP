@@ -8,8 +8,9 @@ from torch.optim import Adam as Optimizer
 from TSPEnv import TSPEnv as Env
 from TSPModel import TSPModel as Model
 
+from baselines import solve_all_gurobi
 from utils.utils import *
-from utils.functions import load_dataset
+from utils.functions import load_dataset, save_dataset
 
 
 class TSPTester:
@@ -64,6 +65,22 @@ class TSPTester:
         self.time_estimator = TimeEstimator()
 
     def run(self):
+        if self.tester_params['test_robustness']:
+            episode = 0
+            test_data = torch.Tensor(self.test_data)
+            opt_sol = [0] * test_data.size(0)
+            while episode < test_data.size(0):
+                remaining = test_data.size(0) - episode
+                batch_size = min(self.tester_params['test_batch_size'], remaining)
+                data = torch.Tensor(test_data[episode: episode + batch_size])
+                test_data[episode: episode + batch_size], opt_sol[episode: episode + batch_size] = self._generate_x_adv(data, eps=50.0)
+                episode += batch_size
+            self.test_data = test_data.cpu().numpy()
+            self.opt_sol = [i[0] for i in opt_sol]
+            # save the adv dataset
+            filename = os.path.split(self.tester_params['test_set_path'])[-1]
+            save_dataset(self.test_data, './adv_{}'.format(filename))
+            save_dataset(opt_sol, './sol_adv_{}'.format(filename))
         if self.fine_tune_params['enable']:
             # fine-tune model on fine-tune dataset (few-shot)
             self._fine_tune_and_test()
@@ -207,7 +224,7 @@ class TSPTester:
         log_prob = prob_list.log().sum(dim=2).reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
         # size = (batch, augmentation * pomo)
         loss = -advantage * log_prob  # Minus Sign: To Increase REWARD
-        # shape: (batch, augmentation * pomo)pretra
+        # shape: (batch, augmentation * pomo)
         loss_mean = loss.mean()
 
         # Score
@@ -218,3 +235,45 @@ class TSPTester:
         self.optimizer.zero_grad()
         loss_mean.backward()
         self.optimizer.step()
+
+    def _generate_x_adv(self, data, eps=10.0):
+        """
+        Generate adversarial data based on the current model, also need to generate optimal sol for x_adv.
+        """
+        from torch.autograd import Variable
+        def minmax(xy_):
+            # min_max normalization: [b,n,2]
+            xy_ = (xy_ - xy_.min(dim=1, keepdims=True)[0]) / (xy_.max(dim=1, keepdims=True)[0] - xy_.min(dim=1, keepdims=True)[0])
+            return xy_
+
+        # generate x_adv
+        self.model.eval()
+        aug_factor, batch_size = 1, data.size(0)
+        with torch.enable_grad():
+            data.requires_grad_()
+            self.env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
+            # print(self.env.problems.requires_grad)
+            reset_state, _, _ = self.env.reset()
+            self.model.pre_forward(reset_state)
+            prob_list = torch.zeros(size=(aug_factor * batch_size, self.env.pomo_size, 0))
+            state, reward, done = self.env.pre_step()
+            while not done:
+                selected, prob = self.model(state)
+                state, reward, done = self.env.step(selected)
+                prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
+
+            aug_reward = reward.reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
+            baseline_reward = aug_reward.float().mean(dim=1, keepdims=True)
+            advantage = aug_reward - baseline_reward
+            log_prob = prob_list.log().sum(dim=2).reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
+
+            # delta = torch.autograd.grad(eps * ((advantage / baseline_reward) * log_prob).mean(), data)[0]
+            delta = torch.autograd.grad(eps * ((-advantage) * log_prob).mean(), data)[0]
+            data = data.detach() + delta
+            data = minmax(data)
+            data = Variable(data, requires_grad=False)
+
+        # generate opt sol
+        opt_sol = solve_all_gurobi(data)
+
+        return data, opt_sol

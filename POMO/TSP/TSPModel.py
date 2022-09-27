@@ -10,13 +10,16 @@ class TSPModel(nn.Module):
         super().__init__()
         self.model_params = model_params
 
-        self.encoder = TSP_Encoder(**model_params)
-        self.decoder = TSP_Decoder(**model_params)
+        self.encoder = TSP_Encoder(**model_params)  # 1187712 (1.19 million)
+        self.decoder = TSP_Decoder(**model_params)  # 82048 (0.08 million)
         self.encoded_nodes = None
         # shape: (batch, problem, EMBEDDING_DIM)
 
     def pre_forward(self, reset_state, weights=None):
-        self.encoded_nodes = self.encoder(reset_state.problems, weights=weights)
+        if weights is not None and self.model_params["meta_update_encoder"]:
+            self.encoded_nodes = self.encoder(reset_state.problems, weights=weights)
+        else:
+            self.encoded_nodes = self.encoder(reset_state.problems, weights=None)
         # shape: (batch, problem, EMBEDDING_DIM)
         self.decoder.set_kv(self.encoded_nodes, weights=weights)
 

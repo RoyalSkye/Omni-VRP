@@ -10,6 +10,7 @@ from TSPEnv import TSPEnv as Env
 from TSPModel import TSPModel as Model
 
 from torch.optim import Adam as Optimizer
+# from torch.optim import SGD as Optimizer
 from torch.optim.lr_scheduler import MultiStepLR as Scheduler
 from TSProblemDef import get_random_problems, generate_task_set
 
@@ -54,9 +55,6 @@ class TSPTrainer:
         self.meta_model = Model(**self.model_params)
         self.optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.task_set = generate_task_set(self.meta_params)
-        # assert self.trainer_params['meta_params']['epochs'] == math.ceil((self.trainer_params['epochs'] * self.trainer_params['train_episodes']) / (
-        #             self.trainer_params['meta_params']['B'] * self.trainer_params['meta_params']['k'] *
-        #             self.trainer_params['meta_params']['meta_batch_size'])), ">> meta-learning iteration does not match with POMO!"
 
         # Restore
         self.start_epoch = 1
@@ -130,7 +128,6 @@ class TSPTrainer:
                 self.logger.info(" *** Training Done *** ")
                 self.logger.info("Now, printing log array...")
                 util_print_log_array(self.logger, self.result_log)
-                print(val_res)
 
     def _train_one_epoch(self, epoch):
         """
@@ -149,6 +146,7 @@ class TSPTrainer:
 
             for step in range(self.meta_params['k']):
                 # generate task-specific data
+                # task_params = random.sample(self.task_set, 1)[0]
                 if self.meta_params['data_type'] == 'distribution':
                     assert len(task_params) == 2
                     data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[-1], distribution='gaussian_mixture')
@@ -205,6 +203,7 @@ class TSPTrainer:
         # Score
         max_pomo_reward, _ = reward.max(dim=1)  # get best results from pomo
         score_mean = -max_pomo_reward.float().mean()  # negative sign to make positive value
+        print(score_mean)
 
         return score_mean, loss_mean
 
