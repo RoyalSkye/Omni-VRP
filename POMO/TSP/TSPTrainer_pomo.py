@@ -1,3 +1,4 @@
+import os
 import copy
 import math
 import time
@@ -15,7 +16,7 @@ from torch.optim.lr_scheduler import MultiStepLR as Scheduler
 from TSProblemDef import get_random_problems, generate_task_set
 
 from utils.utils import *
-from utils.functions import load_dataset
+from utils.functions import *
 
 
 class TSPTrainer:
@@ -84,13 +85,16 @@ class TSPTrainer:
             self.result_log.append('train_score', epoch, train_score)
             self.result_log.append('train_loss', epoch, train_loss)
             # Val
-            no_aug_score = self._fast_val(self.meta_model, val_episodes=32)
-            self.result_log.append('val_score', epoch, no_aug_score)
+            dir, no_aug_score_list = "../../data/TSP/", []
+            for val_path in ["tsp50_uniform.pkl", "tsp100_uniform.pkl", "tsp100_diagonal.pkl", "tsp150_uniform.pkl", "tsp200_uniform.pkl"]:
+                no_aug_score = self._fast_val(self.meta_model, path=os.path.join(dir, val_path), val_episodes=64)
+                no_aug_score_list.append(round(no_aug_score, 4))
+            self.result_log.append('val_score', epoch, no_aug_score_list[-1])
 
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.meta_params['epochs'])
-            self.logger.info("Epoch {:3d}/{:3d}({:.2f}%): Time Est.: Elapsed[{}], Remain[{}], Val Score: {:.4f}".format(
-                epoch, self.meta_params['epochs'], epoch/self.meta_params['epochs']*100, elapsed_time_str, remain_time_str, no_aug_score))
+            self.logger.info("Epoch {:3d}/{:3d}({:.2f}%): Time Est.: Elapsed[{}], Remain[{}], Val Score: {}".format(
+                epoch, self.meta_params['epochs'], epoch/self.meta_params['epochs']*100, elapsed_time_str, remain_time_str, no_aug_score_list))
 
             if self.trainer_params['stop_criterion'] == "epochs":
                 all_done = (epoch == self.meta_params['epochs'])
@@ -126,8 +130,8 @@ class TSPTrainer:
 
             if all_done:
                 self.logger.info(" *** Training Done *** ")
-                self.logger.info("Now, printing log array...")
-                util_print_log_array(self.logger, self.result_log)
+                # self.logger.info("Now, printing log array...")
+                # util_print_log_array(self.logger, self.result_log)
 
     def _train_one_epoch(self, epoch):
         """
@@ -135,7 +139,6 @@ class TSPTrainer:
         2. inner-loop: for a batch of tasks T_i, do reptile -> \theta_i
         3. outer-loop: update meta-model -> \theta_0
         """
-        self.meta_model.train()
         score_AM = AverageMeter()
         loss_AM = AverageMeter()
         batch_size = self.meta_params['meta_batch_size']
@@ -145,24 +148,17 @@ class TSPTrainer:
             task_params = random.sample(self.task_set, 1)[0]
 
             for step in range(self.meta_params['k']):
-                # generate task-specific data
                 # task_params = random.sample(self.task_set, 1)[0]
-                if self.meta_params['data_type'] == 'distribution':
-                    assert len(task_params) == 2
-                    data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[-1], distribution='gaussian_mixture')
-                elif self.meta_params['data_type'] == 'size':
-                    assert len(task_params) == 1
-                    data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform')
-                elif self.meta_params['data_type'] == "size_distribution":
-                    assert len(task_params) == 3
-                    data = get_random_problems(batch_size, problem_size=task_params[0], num_modes=task_params[1], cdist=task_params[-1], distribution='gaussian_mixture')
-                else:
-                    raise NotImplementedError
-
+                data = self._get_data(batch_size, task_params)
+                data = self._generate_x_adv(data, eps=random.randint(10, 100)) if self.trainer_params['adv_train'] else data
                 env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
                 avg_score, avg_loss = self._train_one_batch(data, Env(**env_params))
                 score_AM.update(avg_score.item(), batch_size)
                 loss_AM.update(avg_loss.item(), batch_size)
+
+            val_data = self._get_val_data(self.meta_params['val_batch_size'], task_params)
+            env_params = {'problem_size': val_data.size(1), 'pomo_size': val_data.size(1)}
+            self._train_one_batch(val_data, Env(**env_params))
 
         # Log Once, for each epoch
         self.logger.info('Meta Iteration {:3d}: Score: {:.4f},  Loss: {:.4f}'.format(epoch, score_AM.avg, loss_AM.avg))
@@ -171,6 +167,7 @@ class TSPTrainer:
 
     def _train_one_batch(self, data, env):
 
+        self.meta_model.train()
         batch_size = data.size(0)
         env.load_problems(batch_size, problems=data, aug_factor=1)
         reset_state, _, _ = env.reset()
@@ -207,11 +204,9 @@ class TSPTrainer:
 
         return score_mean, loss_mean
 
-    def _fast_val(self, model, data=None, val_episodes=32):
+    def _fast_val(self, model, data=None, path=None, val_episodes=32):
         aug_factor = 1
-        if data is None:
-            val_path = "../../data/TSP/tsp150_uniform.pkl"
-            data = torch.Tensor(load_dataset(val_path)[: val_episodes])
+        data = torch.Tensor(load_dataset(path)[: val_episodes]) if data is None else data
         env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
 
         model.eval()
@@ -235,3 +230,70 @@ class TSPTrainer:
         no_aug_score = -max_pomo_reward[0, :].float().mean()  # negative sign to make positive value
 
         return no_aug_score.detach().item()
+
+    def _get_data(self, batch_size, task_params):
+
+        if self.meta_params['data_type'] == 'distribution':
+            assert len(task_params) == 2
+            data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[-1], distribution='gaussian_mixture')
+        elif self.meta_params['data_type'] == 'size':
+            assert len(task_params) == 1
+            data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform')
+        elif self.meta_params['data_type'] == "size_distribution":
+            assert len(task_params) == 3
+            data = get_random_problems(batch_size, problem_size=task_params[0], num_modes=task_params[1], cdist=task_params[-1], distribution='gaussian_mixture')
+        else:
+            raise NotImplementedError
+
+        return data
+
+    def _get_val_data(self, batch_size, task_params):
+        val_data = self._get_data(batch_size, task_params)
+        # val_path = "../../data/TSP/tsp100_uniform.pkl"
+        # val_data = torch.Tensor(load_dataset(val_path)[: batch_size])
+
+        return val_data
+
+    def _generate_x_adv(self, data, eps=10.0):
+        """
+        Generate adversarial data based on the current model, also need to generate optimal sol for x_adv.
+        """
+        from torch.autograd import Variable
+        def minmax(xy_):
+            # min_max normalization: [b,n,2]
+            xy_ = (xy_ - xy_.min(dim=1, keepdims=True)[0]) / (xy_.max(dim=1, keepdims=True)[0] - xy_.min(dim=1, keepdims=True)[0])
+            return xy_
+
+        # generate x_adv
+        print(">> Warning! Generating x_adv!")
+        self.meta_model.eval()
+        aug_factor, batch_size = 1, data.size(0)
+        env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
+        with torch.enable_grad():
+            data.requires_grad_()
+            env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
+            reset_state, _, _ = env.reset()
+            self.meta_model.pre_forward(reset_state)
+            prob_list = torch.zeros(size=(aug_factor * batch_size, env.pomo_size, 0))
+            state, reward, done = env.pre_step()
+            while not done:
+                selected, prob = self.meta_model(state)
+                state, reward, done = env.step(selected)
+                prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
+
+            aug_reward = reward.reshape(aug_factor, batch_size, env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
+            baseline_reward = aug_reward.float().mean(dim=1, keepdims=True)
+            advantage = aug_reward - baseline_reward
+            log_prob = prob_list.log().sum(dim=2).reshape(aug_factor, batch_size, env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
+
+            # delta = torch.autograd.grad(eps * ((advantage / baseline_reward) * log_prob).mean(), data)[0]
+            delta = torch.autograd.grad(eps * ((-advantage) * log_prob).mean(), data)[0]
+            data = data.detach() + delta
+            data = minmax(data)
+            data = Variable(data, requires_grad=False)
+
+        # generate opt sol
+        # opt_sol = solve_all_gurobi(data)
+        # return data, opt_sol
+
+        return data

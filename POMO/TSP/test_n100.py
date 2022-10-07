@@ -35,23 +35,23 @@ tester_params = {
     'cuda_device_num': CUDA_DEVICE_NUM,
     'seed': 2023,
     'model_load': {
-        'path': '../../pretrained/var_size_exp1/pomo_adam',  # directory path of pre-trained model and log files saved.
-        'epoch': 78125,  # epoch version of pre-trained model to laod.
+        'path': '../../pretrained/TSP10_50/pomo_batch_31',  # directory path of pre-trained model and log files saved.
+        'epoch': 50000,  # epoch version of pre-trained model to laod.
     },
-    'test_episodes': 7000,
+    'test_episodes': 10000,
     'test_batch_size': 10000,
     'augmentation_enable': True,
     'test_robustness': False,
     'aug_factor': 8,
     'aug_batch_size': 50,
-    'test_set_path': './adv_tsp100_uniform.pkl',  # '../../data/TSP/tsp100_uniform.pkl'
-    'test_set_opt_sol_path': './sol_adv_tsp100_uniform.pkl',  # '../../data/TSP/gurobi/tsp100_uniform.pkl'
+    'test_set_path': '../../data/TSP/tsp100_uniform.pkl',
+    'test_set_opt_sol_path': '../../data/TSP/gurobi/tsp100_uniform.pkl',
     'fine_tune_params': {
         'enable': True,  # evaluate few-shot generalization
         'fine_tune_episodes': 3000,  # how many data used to fine-tune the pretrained model
-        'k': 50,  # gradient decent steps in the inner-loop optimization of meta-learning method
+        'k': 20,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'fine_tune_batch_size': 64,  # the batch size of the inner-loop optimization
-        'fine_tune_set_path': './adv_tsp100_uniform.pkl',
+        'fine_tune_set_path': '../../data/TSP/tsp100_uniform.pkl',
         'augmentation_enable': False,
         'optimizer': {
             'lr': 1e-4 * 0.1,

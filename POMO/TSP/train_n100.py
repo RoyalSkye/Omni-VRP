@@ -11,7 +11,7 @@ from TSPTrainer_Meta import TSPTrainer as Trainer_Meta
 
 DEBUG_MODE = False
 USE_CUDA = not DEBUG_MODE and torch.cuda.is_available()
-CUDA_DEVICE_NUM = 0  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
+CUDA_DEVICE_NUM = 3  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
 
 ##########################################################################################
 # parameters
@@ -30,7 +30,7 @@ model_params = {
     'logit_clipping': 10,
     'ff_hidden_dim': 512,
     'eval_type': 'argmax',
-    'meta_update_encoder': False,
+    'meta_update_encoder': True,
 }
 
 optimizer_params = {
@@ -38,10 +38,14 @@ optimizer_params = {
         'lr': 1e-4,
         'weight_decay': 1e-6
     },
+    # 'scheduler': {
+    #     'milestones': [3001, ],
+    #     'gamma': 0.1
+    # },
     'scheduler': {
-        'milestones': [3001, ],
-        'gamma': 0.1
-    }
+        'T_0': 5000,
+        'T_mult': 2,
+    },
 }
 
 trainer_params = {
@@ -53,9 +57,10 @@ trainer_params = {
     'stop_criterion': 'epochs',  # epochs or time
     'train_episodes': 100000,  # number of instances per epoch
     'train_batch_size': 64,
+    'adv_train': False,
     'logging': {
-        'model_save_interval': 13020,
-        'img_save_interval': 13020,
+        'model_save_interval': 5000,
+        'img_save_interval': 5000,
         'log_image_params_1': {
             'json_foldername': 'log_image_style',
             'filename': 'general.json'
@@ -76,12 +81,13 @@ trainer_params = {
     'meta_params': {
         'enable': True,  # whether use meta-learning or not
         'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile']
-        'bootstrap_steps': 1,
+        'bootstrap_steps': 0,
         'data_type': 'size',  # choose from ["size", "distribution", "size_distribution"]
-        'epochs': 130209,  # the number of meta-model updates: (250*100000) / (1*5*64)
+        'epochs': 50000,  # the number of meta-model updates: (250*100000) / (1*5*64)
         'B': 1,  # the number of tasks in a mini-batch
-        'k': 1,  # gradient decent steps in the inner-loop optimization of meta-learning method
+        'k': 3,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'meta_batch_size': 64,  # the batch size of the inner-loop optimization
+        'val_batch_size': 64,
         'num_task': 5,  # the number of tasks in the training task set
         'alpha': 0.99,  # params for the outer-loop optimization of reptile
         'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile

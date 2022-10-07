@@ -307,24 +307,34 @@ class Add_And_Normalization_Module(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         embedding_dim = model_params['embedding_dim']
+        # self.norm = nn.BatchNorm1d(embedding_dim, affine=True, track_running_stats=True)
         self.norm = nn.InstanceNorm1d(embedding_dim, affine=True, track_running_stats=False)
 
     def forward(self, input1, input2, weights=None):
         if weights is None:
             # input.shape: (batch, problem, embedding)
             added = input1 + input2
-            # shape: (batch, problem, embedding)
-            transposed = added.transpose(1, 2)
-            # shape: (batch, embedding, problem)
-            normalized = self.norm(transposed)
-            # shape: (batch, embedding, problem)
-            back_trans = normalized.transpose(1, 2)
-            # shape: (batch, problem, embedding)
+            if isinstance(self.norm, nn.InstanceNorm1d):
+                transposed = added.transpose(1, 2)
+                # shape: (batch, embedding, problem)
+                normalized = self.norm(transposed)
+                # shape: (batch, embedding, problem)
+                back_trans = normalized.transpose(1, 2)
+                # shape: (batch, problem, embedding)
+            elif isinstance(self.norm, nn.BatchNorm1d):
+                batch, problem, embedding = added.size()
+                normalized = self.norm(added.reshape(-1, embedding))
+                back_trans = normalized.reshape(batch, problem, embedding)
         else:
             added = input1 + input2
-            transposed = added.transpose(1, 2)
-            normalized = F.instance_norm(transposed, weight=weights['weight'], bias=weights['bias'])
-            back_trans = normalized.transpose(1, 2)
+            if isinstance(self.norm, nn.InstanceNorm1d):
+                transposed = added.transpose(1, 2)
+                normalized = F.instance_norm(transposed, weight=weights['weight'], bias=weights['bias'])
+                back_trans = normalized.transpose(1, 2)
+            elif isinstance(self.norm, nn.BatchNorm1d):
+                batch, problem, embedding = added.size()
+                normalized = F.batch_norm(added.reshape(-1, embedding), running_mean=self.norm.running_mean, running_var=self.norm.running_var, weight=weights['weight'], bias=weights['bias'], training=True)
+                back_trans = normalized.reshape(batch, problem, embedding)
 
         return back_trans
 
