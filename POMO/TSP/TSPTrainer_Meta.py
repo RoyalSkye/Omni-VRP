@@ -95,8 +95,13 @@ class TSPTrainer:
             self.result_log.append('train_loss', epoch, train_loss)
             # Val
             dir, no_aug_score_list = "../../data/TSP/", []
-            # for val_path in ["tsp50_uniform.pkl", "tsp100_uniform.pkl", "tsp100_diagonal.pkl", "tsp150_uniform.pkl", "tsp200_uniform.pkl"]:
-            for val_path in ["tsp50_uniform.pkl", "tsp100_uniform.pkl", "tsp150_uniform.pkl", "tsp200_uniform.pkl"]:
+            if self.meta_params["data_type"] == "size":
+                paths = ["tsp50_uniform.pkl", "tsp100_uniform.pkl", "tsp200_uniform.pkl"]
+            elif self.meta_params["data_type"] == "distribution":
+                paths = ["tsp100_uniform.pkl", "tsp100_gaussian.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl", "tsp100_tsplib.pkl"]
+            elif self.meta_params["data_type"] == "size_distribution":
+                pass
+            for val_path in paths:
                 if self.meta_params['meta_method'] in ['fomaml', 'reptile']:
                     no_aug_score = self._fast_val(copy.deepcopy(self.meta_model), path=os.path.join(dir, val_path), val_episodes=64, mode="eval")
                 else:
@@ -155,14 +160,35 @@ class TSPTrainer:
         self.meta_optimizer.zero_grad()
         score_AM = AverageMeter()
         loss_AM = AverageMeter()
-        batch_size = self.meta_params['meta_batch_size']
+
+        """
+        Curriculum learning:
+            for size: gradually increase the problem size
+            for distribution: gradually increase adversarial budgets (i.e., \epsilon)
+        """
+        if self.meta_params["data_type"] in ["size", "distribution"]:
+            self.min_n, self.max_n = self.task_set[0][0], self.task_set[-1][0]  # [20, 150] / [0, 130]
+            # start = self.min_n + int(epoch/self.meta_params['epochs'] * (self.max_n - self.min_n))  # linear
+            start = self.min_n + int(1/2 * (1-math.cos(math.pi * min(epoch/self.meta_params['epochs'], 1))) * (self.max_n - self.min_n))  # cosine
+            end = min(start + 10, self.max_n)  # 10 is the size of the sliding window
+            if self.meta_params["curriculum"]: print(">> training task {}".format((start, end)))
+        elif self.meta_params["data_type"] == "size_distribution":
+            pass
 
         self._alpha_scheduler(epoch)
         fast_weights, val_loss, fomaml_grad = [], 0, []
 
         # sample a batch of tasks
         for i in range(self.meta_params['B']):
-            task_params = random.sample(self.task_set, 1)[0]
+            if self.meta_params["data_type"] == "size":
+                task_params = random.sample(range(start, end+1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
+                batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 100 else self.meta_params['meta_batch_size'] // 2
+            elif self.meta_params["data_type"] == "distribution":
+                task_params = random.sample(range(start, end+1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
+                batch_size = self.meta_params['meta_batch_size']
+            elif self.meta_params["data_type"] == "size_distribution":
+                pass
+
             if self.meta_params['meta_method'] in ['fomaml', 'reptile']:
                 task_model = copy.deepcopy(self.meta_model)
                 optimizer = Optimizer(task_model.parameters(), **self.optimizer_params['optimizer'])
@@ -179,7 +205,6 @@ class TSPTrainer:
             # inner-loop optimization
             for step in range(self.meta_params['k']):
                 data = self._get_data(batch_size, task_params)
-                data = self._generate_x_adv(data, eps=random.randint(10, 100)) if self.trainer_params['adv_train'] else data
                 env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
                 self.meta_model.train()
                 if self.meta_params['meta_method'] in ['reptile', 'fomaml']:
@@ -189,7 +214,7 @@ class TSPTrainer:
                 score_AM.update(avg_score.item(), batch_size)
                 loss_AM.update(avg_loss.item(), batch_size)
 
-            val_data = self._get_val_data(self.meta_params['val_batch_size'], task_params)
+            val_data = self._get_val_data(batch_size, task_params)
             if self.meta_params['meta_method'] == 'maml':
                 val_loss = self._fast_val(fast_weight, data=val_data, mode="maml")
                 val_loss /= self.meta_params['B']
@@ -304,6 +329,7 @@ class TSPTrainer:
         #     for ((name, param), grad) in zip(fast_weight.items(), gradients)
         # )
         optimizer.zero_grad()
+        # torch.autograd.grad(loss_mean, fast_weight.values(), create_graph=True)
         loss_mean.backward(retain_graph=True, create_graph=True)
         optimizer.step()
 
@@ -418,23 +444,28 @@ class TSPTrainer:
     def _get_data(self, batch_size, task_params):
 
         if self.meta_params['data_type'] == 'distribution':
-            assert len(task_params) == 2
-            data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[-1], distribution='gaussian_mixture')
+            assert len(task_params) == 1
+            data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=0, cdist=0, distribution='uniform')
+            data = self._generate_x_adv(data, eps=task_params[0])
         elif self.meta_params['data_type'] == 'size':
             assert len(task_params) == 1
             data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform')
         elif self.meta_params['data_type'] == "size_distribution":
-            assert len(task_params) == 3
-            data = get_random_problems(batch_size, problem_size=task_params[0], num_modes=task_params[1], cdist=task_params[-1], distribution='gaussian_mixture')
+            assert len(task_params) == 2
+            data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform')
+            data = self._generate_x_adv(data, eps=task_params[1])
         else:
             raise NotImplementedError
 
         return data
 
     def _get_val_data(self, batch_size, task_params):
-        val_data = self._get_data(batch_size, task_params)
-        # val_path = "../../data/TSP/tsp150_uniform.pkl"
-        # val_data = torch.Tensor(load_dataset(val_path)[: batch_size])
+        if self.meta_params["data_type"] in ["size", "distribution"]:
+            start1, end1 = min(task_params[0] + 10, self.max_n), min(task_params[0] + 20, self.max_n)
+        elif self.meta_params["data_type"] == "size_distribution":
+            pass
+        val_size = random.sample(range(start1, end1 + 1), 1)[0]
+        val_data = self._get_data(batch_size, (val_size,))
 
         return val_data
 
@@ -454,6 +485,7 @@ class TSPTrainer:
             xy_ = (xy_ - xy_.min(dim=1, keepdims=True)[0]) / (xy_.max(dim=1, keepdims=True)[0] - xy_.min(dim=1, keepdims=True)[0])
             return xy_
 
+        if eps == 0: return data
         # generate x_adv
         print(">> Warning! Generating x_adv!")
         self.meta_model.eval()

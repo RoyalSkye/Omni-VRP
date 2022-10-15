@@ -17,8 +17,8 @@ CUDA_DEVICE_NUM = 3  # $ nohup python -u train_n100.py 2>&1 &, no need to use CU
 # parameters
 
 env_params = {
-    'problem_size': 50,
-    'pomo_size': 50,
+    'problem_size': 100,
+    'pomo_size': 100,
 }
 
 model_params = {
@@ -57,7 +57,6 @@ trainer_params = {
     'stop_criterion': 'epochs',  # epochs or time
     'train_episodes': 100000,  # number of instances per epoch
     'train_batch_size': 64,
-    'adv_train': False,
     'logging': {
         'model_save_interval': 5000,
         'img_save_interval': 5000,
@@ -76,19 +75,17 @@ trainer_params = {
         # 'epoch': 510,  # epoch version of pre-trained model to laod.
 
     },
-    # For fomaml, k needs to be small (1 or 2), but the performance is still inferior.
-    # For reptile, performance is quite well, however, after several iteration, the improvement in inner-loop is trivial.
     'meta_params': {
         'enable': True,  # whether use meta-learning or not
+        'curriculum': True,
         'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile']
         'bootstrap_steps': 0,
-        'data_type': 'size',  # choose from ["size", "distribution", "size_distribution"]
+        'data_type': 'distribution',  # choose from ["size", "distribution", "size_distribution"]
         'epochs': 50000,  # the number of meta-model updates: (250*100000) / (1*5*64)
         'B': 1,  # the number of tasks in a mini-batch
-        'k': 3,  # gradient decent steps in the inner-loop optimization of meta-learning method
-        'meta_batch_size': 64,  # the batch size of the inner-loop optimization
-        'val_batch_size': 64,
-        'num_task': 5,  # the number of tasks in the training task set
+        'k': 1,  # gradient decent steps in the inner-loop optimization of meta-learning method
+        'meta_batch_size': 64,  # will be divided by 2 if problem_size >= 100
+        'num_task': 130,  # the number of tasks in the training task set: e.g., [20, 150] / [0, 130]
         'alpha': 0.99,  # params for the outer-loop optimization of reptile
         'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile
     }
@@ -96,7 +93,7 @@ trainer_params = {
 
 logger_params = {
     'log_file': {
-        'desc': 'train_tsp_n50',
+        'desc': 'train_tsp',
         'filename': 'log.txt'
     }
 }
@@ -140,5 +137,24 @@ def _print_config():
     [logger.info(g_key + "{}".format(globals()[g_key])) for g_key in globals().keys() if g_key.endswith('params')]
 
 
+def check_mem(cuda_device):
+    devices_info = os.popen('"/usr/bin/nvidia-smi" --query-gpu=memory.total,memory.used --format=csv,nounits,noheader').read().strip().split("\n")
+    total, used = devices_info[int(cuda_device)].split(',')
+    return total, used
+
+
+def occumpy_mem(cuda_device):
+    torch.cuda.set_device(cuda_device)
+    total, used = check_mem(cuda_device)
+    total = int(total)
+    used = int(used)
+    max_mem = int(total * 0.85)
+    block_mem = max_mem - used
+    x = torch.cuda.FloatTensor(256, 1024, block_mem)
+    del x
+
+
 if __name__ == "__main__":
+    if trainer_params["meta_params"]["data_type"] in ["size", "size_distribution"]:
+        occumpy_mem(CUDA_DEVICE_NUM)
     main()

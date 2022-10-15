@@ -48,6 +48,12 @@ def display_num_param(net):
     print('There are {} ({:.2f} million) parameters in this neural network'.format(nb_param, nb_param/1e6))
 
 
+def move_to(var, device):
+    if isinstance(var, dict):
+        return {k: move_to(v, device) for k, v in var.items()}
+    return var.to(device)
+
+
 def clip_grad_norms(param_groups, max_norm=math.inf):
     """
     Clips the norms for all param groups to max_norm and returns gradient norms before clipping
@@ -62,6 +68,37 @@ def clip_grad_norms(param_groups, max_norm=math.inf):
     ]
     grad_norms_clipped = [min(g_norm, max_norm) for g_norm in grad_norms] if max_norm > 0 else grad_norms
     return grad_norms, grad_norms_clipped
+
+
+def run_all_in_pool(func, directory, dataset, opts, use_multiprocessing=True):
+    # # Test
+    # res = func((directory, 'test', *dataset[0]))
+    # return [res]
+
+    num_cpus = os.cpu_count() if opts.cpus is None else opts.cpus
+
+    w = len(str(len(dataset) - 1))
+    offset = getattr(opts, 'offset', None)
+    if offset is None:
+        offset = 0
+    ds = dataset[offset:(offset + opts.n if opts.n is not None else len(dataset))]
+    pool_cls = (Pool if use_multiprocessing and num_cpus > 1 else ThreadPool)
+    with pool_cls(num_cpus) as pool:
+        results = list(tqdm(pool.imap(
+            func,
+            [
+                (
+                    directory,
+                    str(i + offset).zfill(w),
+                    *problem
+                )
+                for i, problem in enumerate(ds)
+            ]
+        ), total=len(ds), mininterval=opts.progress_bar_mininterval))
+
+    failed = [str(i + offset) for i, res in enumerate(results) if res is None]
+    assert len(failed) == 0, "Some instances failed: {}".format(" ".join(failed))
+    return results, num_cpus
 
 
 def show(x, y, label, title, xdes, ydes, path, x_scale="linear", dpi=300):
