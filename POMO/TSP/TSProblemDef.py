@@ -10,13 +10,10 @@ from utils.functions import show, seed_everything, load_dataset, save_dataset
 
 def generate_task_set(meta_params):
     if meta_params['data_type'] == "distribution":  # focus on the TSP100 with different distributions
-        # task_set = [(m, l) for l in [1, 10, 20, 30, 50] for m in range(1, 1 + meta_params['num_task'] // 5)] + [(0, 0)]
         task_set = [(eps,) for eps in range(0, 0 + meta_params['num_task'] + 1)]
     elif meta_params['data_type'] == "size":  # focus on uniform distribution with different sizes
         task_set = [(n,) for n in range(20, 20 + meta_params['num_task'] + 1)]
     elif meta_params['data_type'] == "size_distribution":
-        # task_set = [(m, l) for l in [1, 10, 20, 30, 50] for m in range(1, 11)] + [(0, 0)]
-        # task_set = [(n, m, l) for n in [25, 50, 75, 100, 125, 150] for (m, l) in task_set]
         task_set = [(n, eps) for n in range(20, 20 + meta_params['num_task'] + 1) for eps in range(0, 0 + meta_params['num_task'] + 1, 10)]
     else:
         raise NotImplementedError
@@ -115,7 +112,7 @@ def generate_tsp_dist(n_samples, n_nodes, distribution):
         for i in range(n_samples):
             print(n_nodes, i)
             loc = []
-            n_cluster = np.random.randint(low=3, high=9)
+            n_cluster = np.random.randint(low=2, high=9)
             loc.append(np.random.randint(1000, size=[1, n_cluster, 2]))
             prob = np.zeros((1000, 1000))
             coord = np.concatenate([np.tile(np.arange(1000).reshape(-1, 1, 1), [1, 1000, 1]),

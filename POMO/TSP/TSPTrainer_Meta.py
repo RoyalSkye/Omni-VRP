@@ -12,34 +12,33 @@ from TSPModel import TSPModel as Model
 
 from torch.optim import Adam as Optimizer
 # from torch.optim import SGD as Optimizer
-# from torch.optim.lr_scheduler import MultiStepLR as Scheduler
-from torch.optim.lr_scheduler import CosineAnnealingWarmRestarts as Scheduler
 from TSProblemDef import get_random_problems, generate_task_set
 
 from utils.utils import *
 from utils.functions import *
+from TSP_baseline import *
 
 
 class TSPTrainer:
     """
-    Implementation of POMO with MAML / FOMAML / Reptile.
+    Implementation of POMO with MAML / FOMAML / Reptile on TSP.
     For MAML & FOMAML, ref to "Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks";
     For Reptile, ref to "On First-Order Meta-Learning Algorithms".
     Refer to "https://lilianweng.github.io/posts/2018-11-30-meta-learning"
-    MAML's time and space complexity (i.e., GPU memory) is high, so we only update decoder in inner-loop (similar performance).
     """
     def __init__(self,
                  env_params,
                  model_params,
                  optimizer_params,
-                 trainer_params):
+                 trainer_params,
+                 meta_params):
 
         # save arguments
         self.env_params = env_params
         self.model_params = model_params
         self.optimizer_params = optimizer_params
         self.trainer_params = trainer_params
-        self.meta_params = trainer_params['meta_params']
+        self.meta_params = meta_params
 
         # result folder, logger
         self.logger = getLogger(name='trainer')
@@ -60,9 +59,11 @@ class TSPTrainer:
         # Main Components
         self.meta_model = Model(**self.model_params)
         self.meta_optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
-        # self.scheduler = Scheduler(self.meta_optimizer, **self.optimizer_params['scheduler'])
         self.alpha = self.meta_params['alpha']  # for reptile
         self.task_set = generate_task_set(self.meta_params)
+        self.min_n, self.max_n, self.task_interval = self.task_set[0][0], self.task_set[-1][0], 5  # [20, 150] / [0, 100]
+        # self.task_w = {start: 1/(len(self.task_set)//5) for start in range(self.min_n, self.max_n, self.task_interval)}
+        self.task_w = torch.full((len(self.task_set)//self.task_interval,), 1/(len(self.task_set)//self.task_interval))
         self.ema_est = {i[0]: 1 for i in self.task_set}
 
         # Restore
@@ -75,8 +76,7 @@ class TSPTrainer:
             self.start_epoch = 1 + model_load['epoch']
             self.result_log.set_raw_data(checkpoint['result_log'])
             self.meta_optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            # self.scheduler.last_epoch = model_load['epoch']-1
-            self.logger.info('Saved Model Loaded !!')
+            self.logger.info(">> Model loaded from {}".format(checkpoint_fullname))
 
         # utility
         self.time_estimator = TimeEstimator()
@@ -90,7 +90,6 @@ class TSPTrainer:
 
             # Train
             train_score, train_loss = self._train_one_epoch(epoch)
-            # self.scheduler.step()
             self.result_log.append('train_score', epoch, train_score)
             self.result_log.append('train_loss', epoch, train_loss)
             # Val
@@ -98,7 +97,7 @@ class TSPTrainer:
             if self.meta_params["data_type"] == "size":
                 paths = ["tsp50_uniform.pkl", "tsp100_uniform.pkl", "tsp200_uniform.pkl"]
             elif self.meta_params["data_type"] == "distribution":
-                paths = ["tsp100_uniform.pkl", "tsp100_gaussian.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl", "tsp100_tsplib.pkl"]
+                paths = ["tsp100_uniform.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl"]
             elif self.meta_params["data_type"] == "size_distribution":
                 pass
             for val_path in paths:
@@ -135,7 +134,6 @@ class TSPTrainer:
                     'epoch': epoch,
                     'model_state_dict': self.meta_model.state_dict(),
                     'optimizer_state_dict': self.meta_optimizer.state_dict(),
-                    # 'scheduler_state_dict': self.scheduler.state_dict(),
                     'result_log': self.result_log.get_raw_data()
                 }
                 torch.save(checkpoint_dict, '{}/checkpoint-{}.pt'.format(self.result_folder, epoch))
@@ -162,16 +160,23 @@ class TSPTrainer:
         loss_AM = AverageMeter()
 
         """
-        Curriculum learning:
+        Curriculum learning / Adaptive task scheduler:
             for size: gradually increase the problem size
-            for distribution: gradually increase adversarial budgets (i.e., \epsilon)
+            for distribution: adversarial budgets (i.e., \epsilon) may not be correlated with the hardness of constructed 
+                              data distribution. Instead, we evaluate the relative gaps (w.r.t. LKH3) of dist/eps sampled 
+                              from each interval every X iters. Hopefully, it can indicate the hardness of its neighbor.
         """
-        if self.meta_params["data_type"] in ["size", "distribution"]:
-            self.min_n, self.max_n = self.task_set[0][0], self.task_set[-1][0]  # [20, 150] / [0, 130]
+        if self.meta_params["data_type"] == "size":
             # start = self.min_n + int(epoch/self.meta_params['epochs'] * (self.max_n - self.min_n))  # linear
             start = self.min_n + int(1/2 * (1-math.cos(math.pi * min(epoch/self.meta_params['epochs'], 1))) * (self.max_n - self.min_n))  # cosine
             end = min(start + 10, self.max_n)  # 10 is the size of the sliding window
             if self.meta_params["curriculum"]: print(">> training task {}".format((start, end)))
+        elif self.meta_params["data_type"] == "distribution":
+            # Every X iters, evaluating 50 instances for each interval (e.g., [1, 6) / [6, 11) / ...) using LKH3
+            if epoch != 0 and epoch % self.meta_params['update_weight'] == 0:
+                self._update_task_weight()
+            start = torch.multinomial(self.task_w, 1).item() * self.task_interval
+            end = min(start + self.task_interval, self.max_n)
         elif self.meta_params["data_type"] == "size_distribution":
             pass
 
@@ -215,6 +220,7 @@ class TSPTrainer:
                 loss_AM.update(avg_loss.item(), batch_size)
 
             val_data = self._get_val_data(batch_size, task_params)
+            self.meta_model.train()
             if self.meta_params['meta_method'] == 'maml':
                 val_loss = self._fast_val(fast_weight, data=val_data, mode="maml")
                 val_loss /= self.meta_params['B']
@@ -340,7 +346,7 @@ class TSPTrainer:
 
         return score_mean, loss_mean, fast_weight
 
-    def _fast_val(self, model, data=None, path=None, val_episodes=32, mode="eval"):
+    def _fast_val(self, model, data=None, path=None, val_episodes=32, mode="eval", return_all=False):
         aug_factor = 1
         data = torch.Tensor(load_dataset(path)[: val_episodes]) if data is None else data
         env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
@@ -395,9 +401,13 @@ class TSPTrainer:
         max_pomo_reward, _ = aug_reward.max(dim=2)  # get best results from pomo
         # shape: (augmentation, batch)
         no_aug_score = -max_pomo_reward[0, :].float().mean()  # negative sign to make positive value
+        print(no_aug_score)
 
         if mode == "eval":
-            return no_aug_score.detach().item()
+            if return_all:
+                return -max_pomo_reward[0, :].float()
+            else:
+                return no_aug_score.detach().item()
         else:
             return loss_mean
 
@@ -460,11 +470,14 @@ class TSPTrainer:
         return data
 
     def _get_val_data(self, batch_size, task_params):
-        if self.meta_params["data_type"] in ["size", "distribution"]:
+        if self.meta_params["data_type"] == "size":
             start1, end1 = min(task_params[0] + 10, self.max_n), min(task_params[0] + 20, self.max_n)
+            val_size = random.sample(range(start1, end1 + 1), 1)[0]
+        elif self.meta_params["data_type"] == "distribution":
+            val_size = task_params[0]
         elif self.meta_params["data_type"] == "size_distribution":
             pass
-        val_size = random.sample(range(start1, end1 + 1), 1)[0]
+
         val_data = self._get_data(batch_size, (val_size,))
 
         return val_data
@@ -487,7 +500,6 @@ class TSPTrainer:
 
         if eps == 0: return data
         # generate x_adv
-        print(">> Warning! Generating x_adv!")
         self.meta_model.eval()
         aug_factor, batch_size = 1, data.size(0)
         env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
@@ -519,3 +531,34 @@ class TSPTrainer:
         # return data, opt_sol
 
         return data
+
+    def _update_task_weight(self):
+        """
+        Update the weights of tasks.
+        """
+        gap = torch.zeros(len(self.task_set)//self.task_interval)
+        for i in range(gap.size(0)):
+            start = i * self.task_interval
+            end = min(start + self.task_interval, self.max_n)
+            selected = random.sample([j for j in range(start, end+1)], 1)[0]
+            data = self._get_data(batch_size=50, task_params=(selected, ))
+            model_score = self._fast_val(self.meta_model, data=data, mode="eval", return_all=True)
+            model_score = model_score.tolist()
+
+            # get results from LKH3 (~14s)
+            # start_t = time.time()
+            opts = argparse.ArgumentParser()
+            opts.cpus, opts.n, opts.progress_bar_mininterval = None, None, 0.1
+            dataset = [(instance.cpu().numpy(),) for instance in data]
+            executable = get_lkh_executable()
+            global run_func
+            def run_func(args):
+                return solve_lkh_log(executable, *args, runs=1, disable_cache=True)  # otherwise it directly loads data from dir
+            results, _ = run_all_in_pool(run_func, "./LKH3_result", dataset, opts, use_multiprocessing=False)
+            gap_list = [(model_score[j]-results[j][0])/results[j][0]*100 for j in range(len(results))]
+            gap[i] = sum(gap_list)/len(gap_list)
+            # print(">> LKH3 finished within {}s".format(time.time()-start_t))
+        print(gap)
+        print(">> Old task weights: {}".format(self.task_w))
+        self.task_w = torch.softmax(gap, dim=0)
+        print(">> New task weights: {}".format(self.task_w))

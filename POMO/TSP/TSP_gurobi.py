@@ -120,7 +120,7 @@ def solve_all_gurobi(dataset):
     for i, instance in enumerate(dataset):
         print("Solving instance {}".format(i))
         # some hard instances may take prohibitively long time, and ultimately kill the solver, so we set tl=1800s for TSP100 to avoid that.
-        result = solve_euclidian_tsp(instance, timeout=1800)
+        result = solve_euclidian_tsp(instance)
         results.append(result)
     return results
 

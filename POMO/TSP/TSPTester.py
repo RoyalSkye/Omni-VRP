@@ -8,7 +8,7 @@ from torch.optim import Adam as Optimizer
 from TSPEnv import TSPEnv as Env
 from TSPModel import TSPModel as Model
 
-from baselines import solve_all_gurobi
+from TSP_gurobi import solve_all_gurobi
 from utils.utils import *
 from utils.functions import load_dataset, save_dataset
 
@@ -60,6 +60,8 @@ class TSPTester:
         checkpoint_fullname = '{path}/checkpoint-{epoch}.pt'.format(**model_load)
         checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])  # TODO: which performance is good? load or not load?
+        self.logger.info(">> Model loaded from {}".format(checkpoint_fullname))
 
         # utility
         self.time_estimator = TimeEstimator()

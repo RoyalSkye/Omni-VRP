@@ -5,7 +5,6 @@ import torch
 import logging
 from utils.utils import create_logger, copy_all_src
 from utils.functions import seed_everything
-from TSPTrainer import TSPTrainer as Trainer
 from TSPTrainer_pomo import TSPTrainer as Trainer_Pomo
 from TSPTrainer_Meta import TSPTrainer as Trainer_Meta
 
@@ -42,10 +41,6 @@ optimizer_params = {
     #     'milestones': [3001, ],
     #     'gamma': 0.1
     # },
-    'scheduler': {
-        'T_0': 5000,
-        'T_mult': 2,
-    },
 }
 
 trainer_params = {
@@ -73,22 +68,23 @@ trainer_params = {
         'enable': False,  # enable loading pre-trained model
         # 'path': './result/saved_tsp20_model',  # directory path of pre-trained model and log files saved.
         # 'epoch': 510,  # epoch version of pre-trained model to laod.
-
     },
-    'meta_params': {
-        'enable': True,  # whether use meta-learning or not
-        'curriculum': True,
-        'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile']
-        'bootstrap_steps': 0,
-        'data_type': 'distribution',  # choose from ["size", "distribution", "size_distribution"]
-        'epochs': 50000,  # the number of meta-model updates: (250*100000) / (1*5*64)
-        'B': 1,  # the number of tasks in a mini-batch
-        'k': 1,  # gradient decent steps in the inner-loop optimization of meta-learning method
-        'meta_batch_size': 64,  # will be divided by 2 if problem_size >= 100
-        'num_task': 130,  # the number of tasks in the training task set: e.g., [20, 150] / [0, 130]
-        'alpha': 0.99,  # params for the outer-loop optimization of reptile
-        'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile
-    }
+}
+
+meta_params = {
+    'enable': True,  # whether use meta-learning or not
+    'curriculum': True,  # adaptive sample task
+    'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile']
+    'bootstrap_steps': 0,
+    'data_type': 'distribution',  # choose from ["size", "distribution", "size_distribution"]
+    'epochs': 50000,  # the number of meta-model updates: (250*100000) / (1*5*64)
+    'B': 1,  # the number of tasks in a mini-batch
+    'k': 1,  # gradient decent steps in the inner-loop optimization of meta-learning method
+    'meta_batch_size': 64,  # will be divided by 2 if problem_size >= 100
+    'num_task': 100,  # the number of tasks in the training task set: e.g., [20, 150] / [0, 100]
+    'update_weight': 1000,  # update weight of rach task per X iters
+    'alpha': 0.99,  # params for the outer-loop optimization of reptile
+    'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile
 }
 
 logger_params = {
@@ -108,13 +104,13 @@ def main():
 
     seed_everything(trainer_params['seed'])
 
-    if not trainer_params['meta_params']['enable']:
+    if not meta_params['enable']:
         print(">> Start POMO Training.")
         # trainer = Trainer(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
-        trainer = Trainer_Pomo(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
-    elif trainer_params['meta_params']['meta_method'] in ['maml', 'fomaml', 'reptile']:
-        print(">> Start POMO-{} Training.".format(trainer_params['meta_params']['meta_method']))
-        trainer = Trainer_Meta(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
+        trainer = Trainer_Pomo(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params, meta_params=meta_params)
+    elif meta_params['meta_method'] in ['maml', 'fomaml', 'reptile']:
+        print(">> Start POMO-{} Training.".format(meta_params['meta_method']))
+        trainer = Trainer_Meta(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params, meta_params=meta_params)
     else:
         raise NotImplementedError
 
@@ -148,13 +144,12 @@ def occumpy_mem(cuda_device):
     total, used = check_mem(cuda_device)
     total = int(total)
     used = int(used)
-    max_mem = int(total * 0.85)
-    block_mem = max_mem - used
+    block_mem = int((total-used) * 0.85)
     x = torch.cuda.FloatTensor(256, 1024, block_mem)
     del x
 
 
 if __name__ == "__main__":
-    if trainer_params["meta_params"]["data_type"] in ["size", "size_distribution"]:
-        occumpy_mem(CUDA_DEVICE_NUM)
+    if meta_params["data_type"] in ["size", "size_distribution"]:
+        occumpy_mem(CUDA_DEVICE_NUM)  # reserve GPU memory for large size instances
     main()

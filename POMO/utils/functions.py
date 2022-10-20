@@ -7,6 +7,9 @@ import math
 import json
 import pickle
 import matplotlib.pyplot as plt
+from tqdm import tqdm
+from multiprocessing import Pool
+from multiprocessing.dummy import Pool as ThreadPool
 
 
 def check_extension(filename):
@@ -26,11 +29,12 @@ def save_dataset(dataset, filename):
         pickle.dump(dataset, f, pickle.HIGHEST_PROTOCOL)
 
 
-def load_dataset(filename):
+def load_dataset(filename, disable_print=False):
 
     with open(check_extension(filename), 'rb') as f:
         data = pickle.load(f)
-        print(">> Load {} data ({}) from {}".format(len(data), type(data), filename))
+        if not disable_print:
+            print(">> Load {} data ({}) from {}".format(len(data), type(data), filename))
         return data
 
 
@@ -70,11 +74,12 @@ def clip_grad_norms(param_groups, max_norm=math.inf):
     return grad_norms, grad_norms_clipped
 
 
-def run_all_in_pool(func, directory, dataset, opts, use_multiprocessing=True):
+def run_all_in_pool(func, directory, dataset, opts, use_multiprocessing=True, disable_tqdm=True):
     # # Test
     # res = func((directory, 'test', *dataset[0]))
     # return [res]
 
+    os.makedirs(directory, exist_ok=True)
     num_cpus = os.cpu_count() if opts.cpus is None else opts.cpus
 
     w = len(str(len(dataset) - 1))
@@ -94,7 +99,7 @@ def run_all_in_pool(func, directory, dataset, opts, use_multiprocessing=True):
                 )
                 for i, problem in enumerate(ds)
             ]
-        ), total=len(ds), mininterval=opts.progress_bar_mininterval))
+        ), total=len(ds), mininterval=opts.progress_bar_mininterval, disable=disable_tqdm))
 
     failed = [str(i + offset) for i, res in enumerate(results) if res is None]
     assert len(failed) == 0, "Some instances failed: {}".format(" ".join(failed))

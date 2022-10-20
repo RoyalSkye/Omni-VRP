@@ -27,14 +27,15 @@ class TSPTrainer:
                  env_params,
                  model_params,
                  optimizer_params,
-                 trainer_params):
+                 trainer_params,
+                 meta_params):
 
         # save arguments
         self.env_params = env_params
         self.model_params = model_params
         self.optimizer_params = optimizer_params
         self.trainer_params = trainer_params
-        self.meta_params = trainer_params['meta_params']
+        self.meta_params = meta_params
 
         # result folder, logger
         self.logger = getLogger(name='trainer')
@@ -66,7 +67,7 @@ class TSPTrainer:
             self.meta_model.load_state_dict(checkpoint['model_state_dict'])
             self.start_epoch = 1 + model_load['epoch']
             self.result_log.set_raw_data(checkpoint['result_log'])
-            # self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             # self.scheduler.last_epoch = model_load['epoch']-1
             self.logger.info('Saved Model Loaded !!')
 
@@ -89,13 +90,13 @@ class TSPTrainer:
             if self.meta_params["data_type"] == "size":
                 paths = ["tsp50_uniform.pkl", "tsp100_uniform.pkl", "tsp200_uniform.pkl"]
             elif self.meta_params["data_type"] == "distribution":
-                paths = ["tsp100_uniform.pkl", "tsp100_gaussian.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl", "tsp100_tsplib.pkl"]
+                paths = ["tsp100_uniform.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl"]
             elif self.meta_params["data_type"] == "size_distribution":
                 pass
             for val_path in paths:
                 no_aug_score = self._fast_val(self.meta_model, path=os.path.join(dir, val_path), val_episodes=64)
                 no_aug_score_list.append(round(no_aug_score, 4))
-            self.result_log.append('val_score', epoch, no_aug_score_list[-1])
+            self.result_log.append('val_score', epoch, no_aug_score_list)
 
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.meta_params['epochs'])
@@ -122,7 +123,7 @@ class TSPTrainer:
                 checkpoint_dict = {
                     'epoch': epoch,
                     'model_state_dict': self.meta_model.state_dict(),
-                    # 'optimizer_state_dict': self.optimizer.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
                     # 'scheduler_state_dict': self.scheduler.state_dict(),
                     'result_log': self.result_log.get_raw_data()
                 }

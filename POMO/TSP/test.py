@@ -47,7 +47,7 @@ tester_params = {
     'test_set_path': '../../data/TSP/tsp100_uniform.pkl',
     'test_set_opt_sol_path': '../../data/TSP/gurobi/tsp100_uniform.pkl',
     'fine_tune_params': {
-        'enable': True,  # evaluate few-shot generalization
+        'enable': False,  # evaluate few-shot generalization
         'fine_tune_episodes': 3000,  # how many data used to fine-tune the pretrained model
         'k': 20,  # gradient decent steps in the inner-loop optimization of meta-learning method
         'fine_tune_batch_size': 64,  # the batch size of the inner-loop optimization
@@ -101,5 +101,4 @@ def _print_config():
 
 
 if __name__ == "__main__":
-    # TODO: 1. why not use test dataset to fine-tune the model?
     main()
