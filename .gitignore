@@ -13,6 +13,7 @@ __pycache__/
 
 # data & pretrain-model
 backup/
+AM/
 data/
 pretrained/
 

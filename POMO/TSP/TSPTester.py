@@ -219,11 +219,11 @@ class TSPTester:
             prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
 
         # Loss
-        aug_reward = reward.reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
+        aug_reward = reward.reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).reshape(batch_size, -1)
         # shape: (batch, augmentation * pomo)
         advantage = aug_reward - aug_reward.float().mean(dim=1, keepdims=True)
         # shape: (batch, augmentation * pomo)
-        log_prob = prob_list.log().sum(dim=2).reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
+        log_prob = prob_list.log().sum(dim=2).reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).reshape(batch_size, -1)
         # size = (batch, augmentation * pomo)
         loss = -advantage * log_prob  # Minus Sign: To Increase REWARD
         # shape: (batch, augmentation * pomo)

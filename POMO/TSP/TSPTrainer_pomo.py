@@ -17,6 +17,7 @@ from TSProblemDef import get_random_problems, generate_task_set
 
 from utils.utils import *
 from utils.functions import *
+from TSP_baseline import *
 
 
 class TSPTrainer:
@@ -57,6 +58,7 @@ class TSPTrainer:
         self.meta_model = Model(**self.model_params)
         self.optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.task_set = generate_task_set(self.meta_params)
+        self.task_w = torch.full((len(self.task_set),), 1 / len(self.task_set))
 
         # Restore
         self.start_epoch = 1
@@ -85,18 +87,21 @@ class TSPTrainer:
             train_score, train_loss = self._train_one_epoch(epoch)
             self.result_log.append('train_score', epoch, train_score)
             self.result_log.append('train_loss', epoch, train_loss)
+            model_save_interval = self.trainer_params['logging']['model_save_interval']
+            img_save_interval = self.trainer_params['logging']['img_save_interval']
             # Val
             dir, no_aug_score_list = "../../data/TSP/", []
             if self.meta_params["data_type"] == "size":
                 paths = ["tsp50_uniform.pkl", "tsp100_uniform.pkl", "tsp200_uniform.pkl"]
             elif self.meta_params["data_type"] == "distribution":
-                paths = ["tsp100_uniform.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl"]
+                paths = ["tsp100_uniform.pkl", "tsp100_gaussian.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl", "tsp100_tsplib.pkl"]
             elif self.meta_params["data_type"] == "size_distribution":
                 pass
-            for val_path in paths:
-                no_aug_score = self._fast_val(self.meta_model, path=os.path.join(dir, val_path), val_episodes=64)
-                no_aug_score_list.append(round(no_aug_score, 4))
-            self.result_log.append('val_score', epoch, no_aug_score_list)
+            if epoch <= 1 or (epoch % img_save_interval) == 0:
+                for val_path in paths:
+                    no_aug_score = self._fast_val(self.meta_model, path=os.path.join(dir, val_path), val_episodes=64)
+                    no_aug_score_list.append(round(no_aug_score, 4))
+                self.result_log.append('val_score', epoch, no_aug_score_list)
 
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.meta_params['epochs'])
@@ -107,10 +112,8 @@ class TSPTrainer:
                 all_done = (epoch == self.meta_params['epochs'])
             else:
                 all_done = (time.time() - start_time) >= self.trainer_params['time_limit']
-            model_save_interval = self.trainer_params['logging']['model_save_interval']
-            img_save_interval = self.trainer_params['logging']['img_save_interval']
 
-            if epoch > 1:  # save latest images, every epoch
+            if epoch > 1 and (epoch % img_save_interval) == 0:  # save latest images, every X epoch
                 self.logger.info("Saving log_image")
                 image_prefix = '{}/latest'.format(self.result_folder)
                 util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'], self.result_log, labels=['train_score'])
@@ -129,11 +132,11 @@ class TSPTrainer:
                 }
                 torch.save(checkpoint_dict, '{}/checkpoint-{}.pt'.format(self.result_folder, epoch))
 
-            if all_done or (epoch % img_save_interval) == 0:
-                image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, epoch)
-                util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'], self.result_log, labels=['train_score'])
-                util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'], self.result_log, labels=['val_score'])
-                util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_2'], self.result_log, labels=['train_loss'])
+            # if all_done or (epoch % img_save_interval) == 0:
+            #     image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, epoch)
+            #     util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'], self.result_log, labels=['train_score'])
+            #     util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'], self.result_log, labels=['val_score'])
+            #     util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_2'], self.result_log, labels=['train_loss'])
 
             if all_done:
                 self.logger.info(" *** Training Done *** ")
@@ -149,7 +152,7 @@ class TSPTrainer:
         score_AM = AverageMeter()
         loss_AM = AverageMeter()
 
-        # Curriculum learning
+        # Curriculum learning - TODO: need to update
         if self.meta_params["data_type"] in ["size", "distribution"]:
             self.min_n, self.max_n = self.task_set[0][0], self.task_set[-1][0]  # [20, 150] / [0, 130]
             # start = self.min_n + int(epoch/self.meta_params['epochs'] * (self.max_n - self.min_n))  # linear
@@ -166,10 +169,11 @@ class TSPTrainer:
                     task_params = random.sample(range(start, end + 1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
                     batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 100 else self.meta_params['meta_batch_size'] // 2
                 elif self.meta_params["data_type"] == "distribution":
-                    task_params = random.sample(range(start, end + 1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
+                    task_params = self.task_set[torch.multinomial(self.task_w, 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
                     batch_size = self.meta_params['meta_batch_size']
                 elif self.meta_params["data_type"] == "size_distribution":
                     pass
+
                 data = self._get_data(batch_size, task_params)
                 env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
                 avg_score, avg_loss = self._train_one_batch(data, Env(**env_params))
@@ -220,7 +224,7 @@ class TSPTrainer:
 
         return score_mean, loss_mean
 
-    def _fast_val(self, model, data=None, path=None, val_episodes=32):
+    def _fast_val(self, model, data=None, path=None, val_episodes=32, return_all=False):
         aug_factor = 1
         data = torch.Tensor(load_dataset(path)[: val_episodes]) if data is None else data
         env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
@@ -244,22 +248,24 @@ class TSPTrainer:
         max_pomo_reward, _ = aug_reward.max(dim=2)  # get best results from pomo
         # shape: (augmentation, batch)
         no_aug_score = -max_pomo_reward[0, :].float().mean()  # negative sign to make positive value
+        print(no_aug_score)
 
-        return no_aug_score.detach().item()
+        if return_all:
+            return -max_pomo_reward[0, :].float()
+        else:
+            return no_aug_score.detach().item()
 
     def _get_data(self, batch_size, task_params):
 
         if self.meta_params['data_type'] == 'distribution':
-            assert len(task_params) == 1
-            data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=0, cdist=0, distribution='uniform')
-            data = self._generate_x_adv(data, eps=task_params[0])
+            assert len(task_params) == 2
+            data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[1], distribution='gaussian_mixture')
         elif self.meta_params['data_type'] == 'size':
             assert len(task_params) == 1
             data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform')
         elif self.meta_params['data_type'] == "size_distribution":
-            assert len(task_params) == 2
-            data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform')
-            data = self._generate_x_adv(data, eps=task_params[1])
+            assert len(task_params) == 3
+            data = get_random_problems(batch_size, task_params[0], num_modes=task_params[1], cdist=task_params[2], distribution='gaussian_mixture')
         else:
             raise NotImplementedError
 

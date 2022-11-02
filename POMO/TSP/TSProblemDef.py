@@ -9,12 +9,19 @@ from utils.functions import show, seed_everything, load_dataset, save_dataset
 
 
 def generate_task_set(meta_params):
-    if meta_params['data_type'] == "distribution":  # focus on the TSP100 with different distributions
-        task_set = [(eps,) for eps in range(0, 0 + meta_params['num_task'] + 1)]
+    """
+    Current setting:
+        size: (n,) \in [20, 150]
+        distribution: (m, c) \in {(0, 0) + [1-9] * [1, 10, 20, 30, 40, 50]}
+        size_distribution: (n, m, c) \in [30, 50, 70, 90, 110, 130, 150] * {(0, 0) + [2, 4, 6, 8] * [1, 20, 40]}
+    """
+    if meta_params['data_type'] == "distribution":  # focus on TSP100 with gaussian mixture distributions
+        task_set = [(0, 0)] + [(m, c) for m in range(1, 10) for c in [1, 10, 20, 30, 40, 50]]
     elif meta_params['data_type'] == "size":  # focus on uniform distribution with different sizes
-        task_set = [(n,) for n in range(20, 20 + meta_params['num_task'] + 1)]
+        task_set = [(n,) for n in range(20, 151)]
     elif meta_params['data_type'] == "size_distribution":
-        task_set = [(n, eps) for n in range(20, 20 + meta_params['num_task'] + 1) for eps in range(0, 0 + meta_params['num_task'] + 1, 10)]
+        dist_set = [(0, 0)] + [(m, c) for m in [2, 4, 6, 8] for c in [1, 20, 40]]
+        task_set = [(n, m, c) for n in range(30, 151, 20) for (m, c) in dist_set]
     else:
         raise NotImplementedError
     print(">> Generating training task set: {} tasks with type {}".format(len(task_set), meta_params['data_type']))
@@ -93,7 +100,7 @@ def generate_gaussian_mixture_tsp(dataset_size, graph_size, num_modes=0, cdist=0
         xy = MinMaxScaler().fit_transform(xy)
         return xy
 
-    if num_modes == 0 and cdist == 0:
+    if num_modes == 0:
         return np.random.uniform(0, 1, [dataset_size, graph_size, 2])
     else:
         res = []
@@ -230,16 +237,17 @@ if __name__ == "__main__":
     seed_everything(seed=2023)
 
     # var-dist test data
-    for dist in ["uniform", "uniform_rectangle", "gaussian", "cluster", "diagonal", "tsplib"]:
-        print(">> Generating TSP instances following {} distribution!".format(dist))
-        get_random_problems(20000, 100, distribution=dist, path=path)
+    # for dist in ["uniform", "uniform_rectangle", "gaussian", "cluster", "diagonal", "tsplib"]:
+    #     print(">> Generating TSP instances following {} distribution!".format(dist))
+    #     get_random_problems(20000, 100, distribution=dist, path=path)
 
-    for s in [150, 200]:
-        print(">> Generating TSP instances of size {}!".format(s))
-        get_random_problems(20000, s, distribution="uniform", path=path)
+    # var-size test data
+    # for s in [300, 500]:
+    #     print(">> Generating TSP instances of size {}!".format(s))
+    #     get_random_problems(1000, s, distribution="uniform", path=path)
 
-    # data = generate_gaussian_mixture_tsp(dataset_size=64, graph_size=100, num_modes=1, cdist=1)
+    data = generate_gaussian_mixture_tsp(dataset_size=64, graph_size=100, num_modes=9, cdist=1)
     # data = load_dataset("../../data/TSP/tsp100_cluster.pkl")
     # print(type(data), data.size(), data)
-    # x, y = data[9215, :, 0].tolist(), data[9215, :, -1].tolist()
-    # show([x], [y], label=["Gaussian Mixture"], title="TSP100", xdes="x", ydes="y", path="./tsp.pdf")
+    x, y = data[0, :, 0].tolist(), data[0, :, -1].tolist()
+    show([x], [y], label=["Gaussian Mixture"], title="TSP100", xdes="x", ydes="y", path="./tsp.pdf")

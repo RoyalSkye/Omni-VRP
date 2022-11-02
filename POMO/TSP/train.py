@@ -54,7 +54,7 @@ trainer_params = {
     'train_batch_size': 64,
     'logging': {
         'model_save_interval': 5000,
-        'img_save_interval': 5000,
+        'img_save_interval': 10,
         'log_image_params_1': {
             'json_foldername': 'log_image_style',
             'filename': 'general.json'
@@ -75,14 +75,15 @@ meta_params = {
     'enable': True,  # whether use meta-learning or not
     'curriculum': True,  # adaptive sample task
     'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile']
-    'bootstrap_steps': 0,
+    'bootstrap_steps': 20,
     'data_type': 'distribution',  # choose from ["size", "distribution", "size_distribution"]
     'epochs': 50000,  # the number of meta-model updates: (250*100000) / (1*5*64)
     'B': 1,  # the number of tasks in a mini-batch
     'k': 1,  # gradient decent steps in the inner-loop optimization of meta-learning method
     'meta_batch_size': 64,  # will be divided by 2 if problem_size >= 100
     'num_task': 100,  # the number of tasks in the training task set: e.g., [20, 150] / [0, 100]
-    'update_weight': 1000,  # update weight of rach task per X iters
+    'update_weight': 2000,  # update weight of each task per X iters
+    'solver': 'bootstrap',  # solver used to update the task weights, choose from ["best_model", "bootstrap", "lkh3"]
     'alpha': 0.99,  # params for the outer-loop optimization of reptile
     'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile
 }
