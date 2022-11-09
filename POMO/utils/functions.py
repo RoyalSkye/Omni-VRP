@@ -10,6 +10,22 @@ import matplotlib.pyplot as plt
 from tqdm import tqdm
 from multiprocessing import Pool
 from multiprocessing.dummy import Pool as ThreadPool
+from scipy.stats import ttest_rel
+
+
+def check_null_hypothesis(a, b):
+    print(len(a), a)
+    print(len(b), b)
+    alpha_threshold = 0.05
+    t, p = ttest_rel(a, b)  # Calc p value
+    print(t, p)
+    p_val = p / 2  # one-sided
+    # assert t < 0, "T-statistic should be negative"
+    print("p-value: {}".format(p_val))
+    if p_val < alpha_threshold:
+        print(">> Null hypothesis (two related or repeated samples have identical average values) is Rejected.")
+    else:
+        print(">> Null hypothesis (two related or repeated samples have identical average values) is Accepted.")
 
 
 def check_extension(filename):

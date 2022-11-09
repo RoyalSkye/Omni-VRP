@@ -4,7 +4,7 @@ sys.path.insert(0, "..")  # for utils
 import torch
 import logging
 from utils.utils import create_logger, copy_all_src
-from utils.functions import seed_everything
+from utils.functions import seed_everything, check_null_hypothesis
 from TSPTester import TSPTester as Tester
 
 DEBUG_MODE = False
@@ -100,5 +100,17 @@ def _print_config():
     [logger.info(g_key + "{}".format(globals()[g_key])) for g_key in globals().keys() if g_key.endswith('params')]
 
 
+def t_test(path1, path2):
+    import pickle
+    with open(path1, 'rb') as f1:
+        results1 = pickle.load(f1)
+    with open(path2, 'rb') as f2:
+        results2 = pickle.load(f2)
+    check_null_hypothesis(results1["score_list"], results2["score_list"])
+    check_null_hypothesis(results1["aug_score_list"], results2["aug_score_list"])
+
+
 if __name__ == "__main__":
     main()
+    # t_test(path1="../../pretrained/pomo_batch_12_tsp100.pkl", path2="../../pretrained/pomo_maml_11_curri_tsp100.pkl")
+    # t_test(path1="../../pretrained/pomo_batch_12/tsp100_tsplib.pkl", path2="../../pretrained/pomo_maml_11_lkh3online/tsp100_tsplib.pkl")

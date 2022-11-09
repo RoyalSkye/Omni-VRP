@@ -108,10 +108,7 @@ class TSPTrainer:
             self.logger.info("Epoch {:3d}/{:3d}({:.2f}%): Time Est.: Elapsed[{}], Remain[{}], Val Score: {}".format(
                 epoch, self.meta_params['epochs'], epoch/self.meta_params['epochs']*100, elapsed_time_str, remain_time_str, no_aug_score_list))
 
-            if self.trainer_params['stop_criterion'] == "epochs":
-                all_done = (epoch == self.meta_params['epochs'])
-            else:
-                all_done = (time.time() - start_time) >= self.trainer_params['time_limit']
+            all_done = (epoch == self.meta_params['epochs'])
 
             if epoch > 1 and (epoch % img_save_interval) == 0:  # save latest images, every X epoch
                 self.logger.info("Saving log_image")

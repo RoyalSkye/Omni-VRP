@@ -5,12 +5,12 @@ import torch
 import logging
 from utils.utils import create_logger, copy_all_src
 from utils.functions import seed_everything
-from TSPTrainer_pomo import TSPTrainer as Trainer_Pomo
-from TSPTrainer_Meta import TSPTrainer as Trainer_Meta
+from TSPTrainer_pomo import TSPTrainer as Trainer_pomo
+from TSPTrainer_meta import TSPTrainer as Trainer_meta
 
 DEBUG_MODE = False
 USE_CUDA = not DEBUG_MODE and torch.cuda.is_available()
-CUDA_DEVICE_NUM = 3  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
+CUDA_DEVICE_NUM = 2  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
 
 ##########################################################################################
 # parameters
@@ -37,23 +37,15 @@ optimizer_params = {
         'lr': 1e-4,
         'weight_decay': 1e-6
     },
-    # 'scheduler': {
-    #     'milestones': [3001, ],
-    #     'gamma': 0.1
-    # },
 }
 
 trainer_params = {
     'use_cuda': USE_CUDA,
     'cuda_device_num': CUDA_DEVICE_NUM,
     'seed': 1234,
-    'epochs': 500,
-    'time_limit': 86400,
-    'stop_criterion': 'epochs',  # epochs or time
-    'train_episodes': 100000,  # number of instances per epoch
-    'train_batch_size': 64,
+    # 'batch_size': 64,
     'logging': {
-        'model_save_interval': 5000,
+        'model_save_interval': 10000,
         'img_save_interval': 10,
         'log_image_params_1': {
             'json_foldername': 'log_image_style',
@@ -75,15 +67,15 @@ meta_params = {
     'enable': True,  # whether use meta-learning or not
     'curriculum': True,  # adaptive sample task
     'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile']
-    'bootstrap_steps': 20,
-    'data_type': 'distribution',  # choose from ["size", "distribution", "size_distribution"]
+    'bootstrap_steps': 25,
+    'data_type': 'size',  # choose from ["size", "distribution", "size_distribution"]
     'epochs': 50000,  # the number of meta-model updates: (250*100000) / (1*5*64)
     'B': 1,  # the number of tasks in a mini-batch
     'k': 1,  # gradient decent steps in the inner-loop optimization of meta-learning method
     'meta_batch_size': 64,  # will be divided by 2 if problem_size >= 100
-    'num_task': 100,  # the number of tasks in the training task set: e.g., [20, 150] / [0, 100]
-    'update_weight': 2000,  # update weight of each task per X iters
-    'solver': 'bootstrap',  # solver used to update the task weights, choose from ["best_model", "bootstrap", "lkh3"]
+    'update_weight': 1000,  # update weight of each task per X iters
+    'sch_epoch': 30000,  # for the task scheduler of size setting
+    'solver': 'lkh3_offline',  # solver used to update the task weights, choose from ["bootstrap", "lkh3_online", "lkh3_offline", "best_model"]
     'alpha': 0.99,  # params for the outer-loop optimization of reptile
     'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile
 }
@@ -107,11 +99,10 @@ def main():
 
     if not meta_params['enable']:
         print(">> Start POMO Training.")
-        # trainer = Trainer(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params)
-        trainer = Trainer_Pomo(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params, meta_params=meta_params)
+        trainer = Trainer_pomo(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params, meta_params=meta_params)
     elif meta_params['meta_method'] in ['maml', 'fomaml', 'reptile']:
         print(">> Start POMO-{} Training.".format(meta_params['meta_method']))
-        trainer = Trainer_Meta(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params, meta_params=meta_params)
+        trainer = Trainer_meta(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params, meta_params=meta_params)
     else:
         raise NotImplementedError
 
@@ -141,6 +132,9 @@ def check_mem(cuda_device):
 
 
 def occumpy_mem(cuda_device):
+    """
+    Occupy GPU memory in advance for size setting.
+    """
     torch.cuda.set_device(cuda_device)
     total, used = check_mem(cuda_device)
     total = int(total)
