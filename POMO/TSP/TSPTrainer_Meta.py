@@ -57,6 +57,7 @@ class TSPTrainer:
             torch.set_default_tensor_type('torch.FloatTensor')
 
         # Main Components
+        self.model_params["norm"] = None
         self.meta_model = Model(**self.model_params)
         self.meta_optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.alpha = self.meta_params['alpha']  # for reptile
@@ -199,7 +200,8 @@ class TSPTrainer:
         for i in range(self.meta_params['B']):
             if self.meta_params["data_type"] == "size":
                 task_params = random.sample(range(start, end+1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 100 else self.meta_params['meta_batch_size'] // 2
+                batch_size = self.meta_params['meta_batch_size']
+                # batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 100 else self.meta_params['meta_batch_size'] // 2
             elif self.meta_params["data_type"] == "distribution":
                 # sample based on task weights
                 task_params = self.task_set[torch.multinomial(self.task_w, 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
@@ -509,6 +511,7 @@ class TSPTrainer:
     def _generate_x_adv(self, data, eps=10.0):
         """
         Generate adversarial data based on the current model, also need to generate optimal sol for x_adv.
+        See also: "Learning to Solve Travelling Salesman Problem with Hardness-adaptive Curriculum" in AAAI 2022.
         """
         from torch.autograd import Variable
         def minmax(xy_):

@@ -1,9 +1,7 @@
-
-import torch
-
-import os
+import os, time
 import pickle
 from logging import getLogger
+import torch
 from torch.optim import Adam as Optimizer
 
 from TSPEnv import TSPEnv as Env
@@ -18,13 +16,14 @@ class TSPTester:
     def __init__(self,
                  env_params,
                  model_params,
-                 tester_params):
+                 tester_params,
+                 fine_tune_params):
 
         # save arguments
         self.env_params = env_params
         self.model_params = model_params
         self.tester_params = tester_params
-        self.fine_tune_params = tester_params['fine_tune_params']
+        self.fine_tune_params = fine_tune_params
 
         # result folder, logger
         self.logger = getLogger(name='tester')
@@ -44,18 +43,13 @@ class TSPTester:
         # ENV and MODEL
         self.model = Model(**self.model_params)
         self.env = Env(**self.env_params)  # we assume instances in the test/fine-tune dataset have the same problem size.
-        self.optimizer = Optimizer(self.model.parameters(), **self.tester_params['fine_tune_params']['optimizer'])
+        self.optimizer = Optimizer(self.model.parameters(), **self.fine_tune_params['optimizer'])
         self.score_list, self.aug_score_list, self.gap_list, self.aug_gap_list = [], [], [], []
 
         # load dataset
-        self.test_data = load_dataset(tester_params['test_set_path'])[: self.tester_params['test_episodes']]
+        self.test_data = torch.Tensor(load_dataset(tester_params['test_set_path'])[: self.tester_params['test_episodes']])
         opt_sol = load_dataset(tester_params['test_set_opt_sol_path'])[: self.tester_params['test_episodes']]  # [(obj, route), ...]
         self.opt_sol = [i[0] for i in opt_sol]
-        if self.fine_tune_params['enable']:
-            start = tester_params['test_episodes'] if self.tester_params['test_set_path'] == self.fine_tune_params['fine_tune_set_path'] else 0
-            self.fine_tune_data = load_dataset(self.fine_tune_params['fine_tune_set_path'])[start: start+self.fine_tune_params['fine_tune_episodes']]
-        else:
-            self.fine_tune_data = None
 
         # Restore
         model_load = tester_params['model_load']
@@ -69,14 +63,15 @@ class TSPTester:
         self.time_estimator = TimeEstimator()
 
     def run(self):
+        start_time = time.time()
         if self.tester_params['test_robustness']:
             episode = 0
-            test_data = torch.Tensor(self.test_data)
+            test_data = self.test_data
             opt_sol = [0] * test_data.size(0)
             while episode < test_data.size(0):
                 remaining = test_data.size(0) - episode
                 batch_size = min(self.tester_params['test_batch_size'], remaining)
-                data = torch.Tensor(test_data[episode: episode + batch_size])
+                data = test_data[episode: episode + batch_size]
                 test_data[episode: episode + batch_size], opt_sol[episode: episode + batch_size] = self._generate_x_adv(data, eps=50.0)
                 episode += batch_size
             self.test_data = test_data.cpu().numpy()
@@ -86,20 +81,22 @@ class TSPTester:
             save_dataset(self.test_data, './adv_{}'.format(filename))
             save_dataset(opt_sol, './sol_adv_{}'.format(filename))
         if self.fine_tune_params['enable']:
-            # fine-tune model on fine-tune dataset (few-shot)
+            # fine-tune model on (little) data which has the same distribution of the test dataset (few-shot)
+            start = self.tester_params['test_episodes']
+            self.fine_tune_data = torch.Tensor(load_dataset(self.tester_params['test_set_path'])[start: start + self.fine_tune_params['fine_tune_episodes']])
             self._fine_tune_and_test()
         else:
-            # test the model on test dataset
-            self._test()
+            # test the model on test dataset (zero-shot)
+            self._test(store_res=True)
+        print(">> Evaluation on {} finished within {:.2f}s".format(self.tester_params['test_set_path'], time.time() - start_time))
 
         # save results to file
-        # with open(os.path.join(self.result_folder, 'result_lists.pkl'), 'wb') as f:
         with open(os.path.split(self.tester_params['test_set_path'])[-1], 'wb') as f:
             result = {"score_list": self.score_list, "aug_score_list": self.aug_score_list, "gap_list": self.gap_list, "aug_gap_list": self.aug_gap_list}
             pickle.dump(result, f, pickle.HIGHEST_PROTOCOL)
+            print(">> Save final results to {}".format(os.path.split(self.tester_params['test_set_path'])[-1]))
 
     def _test(self, store_res=True):
-
         self.time_estimator.reset()
         score_AM, gap_AM = AverageMeter(), AverageMeter()
         aug_score_AM, aug_gap_AM = AverageMeter(), AverageMeter()
@@ -110,7 +107,7 @@ class TSPTester:
         while episode < test_num_episode:
             remaining = test_num_episode - episode
             batch_size = min(self.tester_params['test_batch_size'], remaining)
-            score, aug_score, all_score, all_aug_score = self._test_one_batch(torch.Tensor(self.test_data[episode: episode + batch_size]))
+            score, aug_score, all_score, all_aug_score = self._test_one_batch(self.test_data[episode: episode + batch_size])
             opt_sol = self.opt_sol[episode: episode + batch_size]
             score_AM.update(score, batch_size)
             aug_score_AM.update(aug_score, batch_size)
@@ -126,9 +123,6 @@ class TSPTester:
                 self.gap_list += gap
                 self.aug_gap_list += aug_gap
 
-            ############################
-            # Logs
-            ############################
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(episode, test_num_episode)
             self.logger.info("episode {:3d}/{:3d}, Elapsed[{}], Remain[{}], score:{:.3f}, aug_score:{:.3f}".format(
                 episode, test_num_episode, elapsed_time_str, remain_time_str, score, aug_score))
@@ -139,8 +133,8 @@ class TSPTester:
                 self.logger.info(" *** Test Done *** ")
                 self.logger.info(" NO-AUG SCORE: {:.4f}, Gap: {:.4f} ".format(score_AM.avg, gap_AM.avg))
                 self.logger.info(" AUGMENTATION SCORE: {:.4f}, Gap: {:.4f} ".format(aug_score_AM.avg, aug_gap_AM.avg))
-                print("{:.4f} ({:.4f}%)".format(score_AM.avg, gap_AM.avg))
-                print("{:.4f} ({:.4f}%)".format(aug_score_AM.avg, aug_gap_AM.avg))
+                print("{:.3f} ({:.3f}%)".format(score_AM.avg, gap_AM.avg))
+                print("{:.3f} ({:.3f}%)".format(aug_score_AM.avg, aug_gap_AM.avg))
 
         return score_AM.avg, aug_score_AM.avg, gap_AM.avg, aug_gap_AM.avg
 
@@ -184,28 +178,28 @@ class TSPTester:
 
     def _fine_tune_and_test(self):
         """
-        evaluate few-shot generalization: fine-tune k steps on a small fine-tune dataset, test on test dataset after every step
+        Evaluate few-shot generalization: fine-tune k steps on a small fine-tune dataset
         """
         fine_tune_episode = self.fine_tune_params['fine_tune_episodes']
         assert len(self.fine_tune_data) == fine_tune_episode, "the number of fine-tune instances does not match!"
         score_list, aug_score_list, gap_list, aug_gap_list = [], [], [], []
-        score, aug_score, gap, aug_gap = self._test(store_res=False)
-        score_list.append(score); aug_score_list.append(aug_score)
-        gap_list.append(gap); aug_gap_list.append(aug_gap)
 
         for k in range(self.fine_tune_params['k']):
+            # score, aug_score, gap, aug_gap = self._test(store_res=False)
+            # score_list.append(score); aug_score_list.append(aug_score)
+            # gap_list.append(gap); aug_gap_list.append(aug_gap)
             self.logger.info("Start fine-tune step {}".format(k+1))
             episode = 0
             while episode < fine_tune_episode:
                 remaining = fine_tune_episode - episode
                 batch_size = min(self.fine_tune_params['fine_tune_batch_size'], remaining)
-                self._fine_tune_one_batch(torch.Tensor(self.fine_tune_data[episode:episode+batch_size]))
+                self._fine_tune_one_batch(self.fine_tune_data[episode:episode+batch_size])
                 episode += batch_size
-            score, aug_score, gap, aug_gap = self._test()
-            score_list.append(score); aug_score_list.append(aug_score)
-            gap_list.append(gap); aug_gap_list.append(aug_gap)
 
-        print(self.tester_params['test_set_path'])
+        score, aug_score, gap, aug_gap = self._test(store_res=True)
+        score_list.append(score); aug_score_list.append(aug_score)
+        gap_list.append(gap); aug_gap_list.append(aug_gap)
+
         print("Final score_list: {}".format(score_list))
         print("Final aug_score_list {}".format(aug_score_list))
         print("Final gap_list: {}".format(gap_list))

@@ -55,6 +55,7 @@ class TSPTrainer:
             torch.set_default_tensor_type('torch.FloatTensor')
 
         # Main Components
+        self.model_params["norm"] = "instance"  # Original "POMO" Paper uses instance/batch normalization
         self.meta_model = Model(**self.model_params)
         self.optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.task_set = generate_task_set(self.meta_params)
@@ -164,7 +165,8 @@ class TSPTrainer:
             for step in range(self.meta_params['k']):
                 if self.meta_params["data_type"] == "size":
                     task_params = random.sample(range(start, end + 1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                    batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 100 else self.meta_params['meta_batch_size'] // 2
+                    batch_size = self.meta_params['meta_batch_size']
+                    # batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 100 else self.meta_params['meta_batch_size'] // 2
                 elif self.meta_params["data_type"] == "distribution":
                     task_params = self.task_set[torch.multinomial(self.task_w, 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
                     batch_size = self.meta_params['meta_batch_size']

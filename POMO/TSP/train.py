@@ -10,7 +10,7 @@ from TSPTrainer_meta import TSPTrainer as Trainer_meta
 
 DEBUG_MODE = False
 USE_CUDA = not DEBUG_MODE and torch.cuda.is_available()
-CUDA_DEVICE_NUM = 2  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
+CUDA_DEVICE_NUM = 0  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
 
 ##########################################################################################
 # parameters

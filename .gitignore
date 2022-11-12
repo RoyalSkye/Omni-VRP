@@ -13,7 +13,6 @@ __pycache__/
 
 # data & pretrain-model
 backup/
-AM/
 data/
 pretrained/
 
@@ -21,4 +20,3 @@ pretrained/
 utils_plot*
 imgs/
 1.md
-

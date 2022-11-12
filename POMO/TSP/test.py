@@ -28,6 +28,7 @@ model_params = {
     'logit_clipping': 10,
     'ff_hidden_dim': 512,
     'eval_type': 'argmax',
+    'norm': None  # TODO: which has a better performance?
 }
 
 tester_params = {
@@ -43,28 +44,29 @@ tester_params = {
     'augmentation_enable': True,
     'test_robustness': False,
     'aug_factor': 8,
-    'aug_batch_size': 50,
+    'aug_batch_size': 100,
     'test_set_path': '../../data/TSP/tsp100_uniform.pkl',
-    'test_set_opt_sol_path': '../../data/TSP/gurobi/tsp100_uniform.pkl',
-    'fine_tune_params': {
-        'enable': False,  # evaluate few-shot generalization
-        'fine_tune_episodes': 3000,  # how many data used to fine-tune the pretrained model
-        'k': 20,  # gradient decent steps in the inner-loop optimization of meta-learning method
-        'fine_tune_batch_size': 64,  # the batch size of the inner-loop optimization
-        'fine_tune_set_path': '../../data/TSP/tsp100_uniform.pkl',
-        'augmentation_enable': False,
-        'optimizer': {
-            'lr': 1e-4 * 0.1,
-            'weight_decay': 1e-6
-        },
+    'test_set_opt_sol_path': '../../data/TSP/gurobi/tsp100_uniform.pkl'
+}
+
+fine_tune_params = {
+    'enable': True,  # evaluate few-shot generalization
+    'fine_tune_episodes': 500,  # how many data used to fine-tune the pretrained model
+    'k': 20,  # fine-tune steps/epochs
+    'fine_tune_batch_size': 64,  # the batch size of the inner-loop optimization
+    'augmentation_enable': False,
+    'optimizer': {
+        'lr': 1e-4 * 0.1,
+        'weight_decay': 1e-6
     }
 }
+
 if tester_params['augmentation_enable']:
     tester_params['test_batch_size'] = tester_params['aug_batch_size']
 
 logger_params = {
     'log_file': {
-        'desc': 'test_tsp_n50',
+        'desc': 'test_tsp',
         'filename': 'log.txt'
     }
 }
@@ -81,7 +83,8 @@ def main():
 
     tester = Tester(env_params=env_params,
                     model_params=model_params,
-                    tester_params=tester_params)
+                    tester_params=tester_params,
+                    fine_tune_params=fine_tune_params)
 
     copy_all_src(tester.result_folder)
 
@@ -101,6 +104,9 @@ def _print_config():
 
 
 def t_test(path1, path2):
+    """
+    Conduct T-test to check the null hypothesis. If p < 0.05, the null hypothesis is rejected.
+    """
     import pickle
     with open(path1, 'rb') as f1:
         results1 = pickle.load(f1)

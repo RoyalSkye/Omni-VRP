@@ -145,10 +145,16 @@ class EncoderLayer(nn.Module):
             v = reshape_by_heads(F.linear(input1, weights['encoder.layers.{}.Wv.weight'.format(index)], bias=None), head_num=head_num)
             out_concat = multi_head_attention(q, k, v)
             multi_head_out = F.linear(out_concat, weights['encoder.layers.{}.multi_head_combine.weight'.format(index)], weights['encoder.layers.{}.multi_head_combine.bias'.format(index)])
-            out1 = self.addAndNormalization1(input1, multi_head_out, weights={'weight': weights['encoder.layers.{}.addAndNormalization1.norm.weight'.format(index)], 'bias': weights['encoder.layers.{}.addAndNormalization1.norm.bias'.format(index)]})
+            if self.model_params['norm'] is None:
+                out1 = self.addAndNormalization1(input1, multi_head_out)
+            else:
+                out1 = self.addAndNormalization1(input1, multi_head_out, weights={'weight': weights['encoder.layers.{}.addAndNormalization1.norm.weight'.format(index)], 'bias': weights['encoder.layers.{}.addAndNormalization1.norm.bias'.format(index)]})
             out2 = self.feedForward(out1, weights={'weight1': weights['encoder.layers.{}.feedForward.W1.weight'.format(index)], 'bias1': weights['encoder.layers.{}.feedForward.W1.bias'.format(index)],
                                                    'weight2': weights['encoder.layers.{}.feedForward.W2.weight'.format(index)], 'bias2': weights['encoder.layers.{}.feedForward.W2.bias'.format(index)]})
-            out3 = self.addAndNormalization2(out1, out2, weights={'weight': weights['encoder.layers.{}.addAndNormalization2.norm.weight'.format(index)], 'bias': weights['encoder.layers.{}.addAndNormalization2.norm.bias'.format(index)]})
+            if self.model_params['norm'] is None:
+                out3 = self.addAndNormalization2(out1, out2)
+            else:
+                out3 = self.addAndNormalization2(out1, out2, weights={'weight': weights['encoder.layers.{}.addAndNormalization2.norm.weight'.format(index)], 'bias': weights['encoder.layers.{}.addAndNormalization2.norm.bias'.format(index)]})
 
         return out3
         # shape: (batch, problem, EMBEDDING_DIM)
@@ -307,8 +313,12 @@ class Add_And_Normalization_Module(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         embedding_dim = model_params['embedding_dim']
-        # self.norm = nn.BatchNorm1d(embedding_dim, affine=True, track_running_stats=True)
-        self.norm = nn.InstanceNorm1d(embedding_dim, affine=True, track_running_stats=False)
+        if model_params["norm"] == "batch":
+            self.norm = nn.BatchNorm1d(embedding_dim, affine=True, track_running_stats=True)
+        elif model_params["norm"] == "instance":
+            self.norm = nn.InstanceNorm1d(embedding_dim, affine=True, track_running_stats=False)
+        else:
+            self.norm = None
 
     def forward(self, input1, input2, weights=None):
         if weights is None:
@@ -325,6 +335,8 @@ class Add_And_Normalization_Module(nn.Module):
                 batch, problem, embedding = added.size()
                 normalized = self.norm(added.reshape(-1, embedding))
                 back_trans = normalized.reshape(batch, problem, embedding)
+            else:
+                back_trans = added
         else:
             added = input1 + input2
             if isinstance(self.norm, nn.InstanceNorm1d):
@@ -335,6 +347,8 @@ class Add_And_Normalization_Module(nn.Module):
                 batch, problem, embedding = added.size()
                 normalized = F.batch_norm(added.reshape(-1, embedding), running_mean=self.norm.running_mean, running_var=self.norm.running_var, weight=weights['weight'], bias=weights['bias'], training=True)
                 back_trans = normalized.reshape(batch, problem, embedding)
+            else:
+                back_trans = added
 
         return back_trans
 
