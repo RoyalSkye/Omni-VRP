@@ -100,7 +100,7 @@ def solve_concorde_log(executable, directory, name, loc, disable_cache=False):
 
 def get_lkh_executable(url="http://www.akira.ruc.dk/~keld/research/LKH-3/LKH-3.0.7.tgz"):
 
-    cwd = os.path.abspath(os.path.join("lkh"))
+    cwd = os.path.abspath("lkh")
     os.makedirs(cwd, exist_ok=True)
 
     file = os.path.join(cwd, os.path.split(urlparse(url).path)[-1])
@@ -372,18 +372,18 @@ def solve_all_nn(dataset_path, eval_batch_size=1024, no_cuda=False, dataset_n=No
 if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
-    parser.add_argument("--method", type=str, default='lkh', choices=['nn', "gurobi", "gurobigap", "gurobit", "concorde", "lkh", "random_insertion", "nearest_insertion", "farthest_insertion"])
-    parser.add_argument("--datasets", nargs='+', default=["../../data/TSP/tsp50_uniform.pkl", ], help="Filename of the dataset(s) to evaluate")
-    parser.add_argument("-f", action='store_true', help="Set true to overwrite")
+    parser.add_argument("--method", type=str, default='concorde', choices=["nn", "gurobi", "gurobigap", "gurobit", "concorde", "lkh", "random_insertion", "nearest_insertion", "farthest_insertion"])
+    parser.add_argument("--datasets", nargs='+', default=["../../data/TSP/Size/tsp100_uniform.pkl", ], help="Filename of the dataset(s) to evaluate")
+    parser.add_argument("-f", action='store_false', help="Set true to overwrite")
     parser.add_argument("-o", default=None, help="Name of the results file to write")
     parser.add_argument("--cpus", type=int, help="Number of CPUs to use, defaults to all cores")
     parser.add_argument('--no_cuda', action='store_true', help='Disable CUDA (only for Tsiligirides)')
-    parser.add_argument('--disable_cache', action='store_true', help='Disable caching')
-    parser.add_argument('--max_calc_batch_size', type=int, default=1000, help='Size for subbatches')
+    parser.add_argument('--disable_cache', action='store_false', help='Disable caching')
+    parser.add_argument('--max_calc_batch_size', type=int, default=10000, help='Size for subbatches')
     parser.add_argument('--progress_bar_mininterval', type=float, default=0.1, help='Minimum interval')
-    parser.add_argument('-n', type=int, default=1000, help="Number of instances to process")
+    parser.add_argument('-n', type=int, default=10000, help="Number of instances to process")
     parser.add_argument('--offset', type=int, default=0, help="Offset where to start processing")
-    parser.add_argument('--results_dir', default='results', help="Name of results directory")
+    parser.add_argument('--results_dir', default='baseline_results', help="Name of results directory")
 
     opts = parser.parse_args()
 
@@ -396,12 +396,12 @@ if __name__ == "__main__":
         dataset_basename, ext = os.path.splitext(os.path.split(dataset_path)[-1])
 
         if opts.o is None:
-            results_dir = os.path.join(opts.results_dir, "tsp", dataset_basename)
+            results_dir = os.path.join(opts.results_dir, "tsp_{}".format(opts.method), dataset_basename)
             os.makedirs(results_dir, exist_ok=True)
 
             out_file = os.path.join(results_dir, "{}{}{}-{}{}".format(
                 dataset_basename,
-                "offs{}".format(opts.offset) if opts.offset is not None else "",
+                "offset{}".format(opts.offset) if opts.offset is not None else "",
                 "n{}".format(opts.n) if opts.n is not None else "",
                 opts.method, ext
             ))
@@ -416,6 +416,7 @@ if __name__ == "__main__":
         method = match[1]
         runs = 1 if match[2] == '' else int(match[2])
 
+        start_t = time.time()
         if method == "nn":
             assert opts.offset is None, "Offset not supported for nearest neighbor"
 
@@ -442,7 +443,7 @@ if __name__ == "__main__":
 
             if method == "concorde":
                 use_multiprocessing = False
-                executable = os.path.abspath(os.path.join('problems', 'tsp', 'concorde', 'concorde', 'TSP', 'concorde'))
+                executable = os.path.abspath(os.path.join('concorde', 'concorde', 'TSP', 'concorde'))
 
                 def run_func(args):
                     return solve_concorde_log(executable, *args, disable_cache=opts.disable_cache)
@@ -477,10 +478,12 @@ if __name__ == "__main__":
             assert False, "Unknown method: {}".format(opts.method)
 
         costs, tours, durations = zip(*results)  # Not really costs since they should be negative
+        print(">> Solving {} instances within {:.2f}s using {}".format(opts.n, time.time()-start_t, opts.method))
         print("Average cost: {} +- {}".format(np.mean(costs), 2 * np.std(costs) / np.sqrt(len(costs))))
-        print("Average serial duration: {} +- {}".format(
-            np.mean(durations), 2 * np.std(durations) / np.sqrt(len(durations))))
+        print("Average serial duration: {} +- {}".format(np.mean(durations), 2 * np.std(durations) / np.sqrt(len(durations))))
         print("Average parallel duration: {}".format(np.mean(durations) / parallelism))
         print("Calculated total duration: {}".format(timedelta(seconds=int(np.sum(durations) / parallelism))))
 
-        save_dataset((results, parallelism), out_file)
+        results = [(i[0], i[1]) for i in results]
+        # print(results)
+        save_dataset(results, out_file)  # [(obj, route), ...]

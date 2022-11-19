@@ -1,8 +1,7 @@
-
 from dataclasses import dataclass
 import torch
 
-from TSProblemDef import get_random_problems, augment_xy_data_by_8_fold
+from ProblemDef import get_random_problems, augment_xy_data_by_8_fold
 
 
 @dataclass
@@ -54,7 +53,7 @@ class TSPEnv:
             self.problems = problems
         else:
             self.batch_size = batch_size
-            self.problems = get_random_problems(batch_size, self.problem_size, distribution='uniform')
+            self.problems = get_random_problems(batch_size, self.problem_size, distribution='uniform', problem="tsp")
             # problems.shape: (batch, problem, 2)
 
         if aug_factor > 1:

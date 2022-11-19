@@ -1,5 +1,6 @@
-import numpy as np
+import math
 import pickle
+import numpy as np
 
 
 def read_instance_pkl(instances_path):
@@ -9,13 +10,14 @@ def read_instance_pkl(instances_path):
     coord = []
     demands = []
     for instance_data in instances_data:
-        coord.append([instance_data[0]])
-        coord[-1].extend(instance_data[1])
-        coord[-1] = np.array(coord[-1])
-        demands.append(np.array(instance_data[2]))
+        coord.append(instance_data[0])  # depot
+        coord[-1].extend(instance_data[1])  # nodes
+        coord[-1] = np.array(coord[-1])  # (1 + problem_size, 2)
+        demands.append(np.array(instance_data[2]) / instance_data[3])
 
-    coord = np.stack(coord)
-    demands = np.stack(demands)
+    coord = np.stack(coord)  # (dataset_size, problem_size+1, 2)
+    demands = np.stack(demands)  # (dataset_size, problem_size)
+
     return coord, demands
 
 

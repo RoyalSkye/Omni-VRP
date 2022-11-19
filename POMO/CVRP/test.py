@@ -5,7 +5,7 @@ import torch
 import logging
 from utils.utils import create_logger, copy_all_src
 from utils.functions import seed_everything, check_null_hypothesis
-from TSPTester import TSPTester as Tester
+from CVRPTester import CVRPTester as Tester
 
 DEBUG_MODE = False
 USE_CUDA = not DEBUG_MODE and torch.cuda.is_available()
@@ -28,8 +28,9 @@ model_params = {
     'logit_clipping': 10,
     'ff_hidden_dim': 512,
     'eval_type': 'argmax',
-    'norm': None  # TODO: which has a better performance?
+    'norm': None
 }
+
 
 tester_params = {
     'use_cuda': USE_CUDA,
@@ -37,7 +38,7 @@ tester_params = {
     'seed': 2023,
     'model_load': {
         'path': '../../pretrained/pomo_pretrained',  # directory path of pre-trained model and log files saved.
-        'epoch': 250000,  # epoch version of pre-trained model to load.
+        'epoch': 30500,  # epoch version of pre-trained model to load.
     },
     'test_episodes': 10000,
     'test_batch_size': 10000,
@@ -45,8 +46,8 @@ tester_params = {
     'test_robustness': False,
     'aug_factor': 8,
     'aug_batch_size': 100,
-    'test_set_path': '../../data/TSP/Size/tsp100_uniform.pkl',
-    'test_set_opt_sol_path': '../../data/TSP/Size/opt_tsp100_uniform.pkl'
+    'test_set_path': '../../data/CVRP/Size/cvrp100_uniform.pkl',
+    'test_set_opt_sol_path': '../../data/CVRP/Size/opt_cvrp100_uniform.pkl'
 }
 
 fine_tune_params = {
@@ -66,7 +67,7 @@ if tester_params['augmentation_enable']:
 
 logger_params = {
     'log_file': {
-        'desc': 'test_tsp',
+        'desc': 'test_cvrp',
         'filename': 'log.txt'
     }
 }
@@ -93,7 +94,7 @@ def main():
 
 def _set_debug_mode():
     global tester_params
-    tester_params['test_episodes'] = 100
+    tester_params['test_episodes'] = 10
 
 
 def _print_config():
@@ -118,5 +119,3 @@ def t_test(path1, path2):
 
 if __name__ == "__main__":
     main()
-    # t_test(path1="../../pretrained/pomo_batch_12_tsp100.pkl", path2="../../pretrained/pomo_maml_11_curri_tsp100.pkl")
-    # t_test(path1="../../pretrained/pomo_batch_12/tsp100_tsplib.pkl", path2="../../pretrained/pomo_maml_11_lkh3online/tsp100_tsplib.pkl")

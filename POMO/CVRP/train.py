@@ -5,12 +5,12 @@ import torch
 import logging
 from utils.utils import create_logger, copy_all_src
 from utils.functions import seed_everything
-from TSPTrainer_pomo import TSPTrainer as Trainer_pomo
-from TSPTrainer_meta import TSPTrainer as Trainer_meta
+from CVRPTrainer_pomo import CVRPTrainer as Trainer_pomo
+from CVRPTrainer_meta import CVRPTrainer as Trainer_meta
 
 DEBUG_MODE = False
 USE_CUDA = not DEBUG_MODE and torch.cuda.is_available()
-CUDA_DEVICE_NUM = 0  # $ nohup python -u train_n100.py 2>&1 &, no need to use CUDA_VISIBLE_DEVICES=0
+CUDA_DEVICE_NUM = 0
 
 ##########################################################################################
 # parameters
@@ -58,14 +58,15 @@ trainer_params = {
     },
     'model_load': {
         'enable': False,  # enable loading pre-trained model
-        # 'path': './result/saved_tsp20_model',  # directory path of pre-trained model and log files saved.
-        # 'epoch': 510,  # epoch version of pre-trained model to laod.
-    },
+        # 'path': './result/saved_CVRP20_model',  # directory path of pre-trained model and log files saved.
+        # 'epoch': 2000,  # epoch version of pre-trained model to laod.
+
+    }
 }
 
 meta_params = {
     'enable': True,  # whether use meta-learning or not
-    'curriculum': True,  # adaptive sample task
+    'curriculum': False,  # adaptive sample task
     'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile']
     'bootstrap_steps': 25,
     'data_type': 'size',  # choose from ["size", "distribution", "size_distribution"]
@@ -82,8 +83,8 @@ meta_params = {
 
 logger_params = {
     'log_file': {
-        'desc': 'train_tsp',
-        'filename': 'log.txt'
+        'desc': 'train_cvrp',
+        'filename': 'run_log'
     }
 }
 
@@ -98,10 +99,10 @@ def main():
     seed_everything(trainer_params['seed'])
 
     if not meta_params['enable']:
-        print(">> Start TSP-POMO Training.")
+        print(">> Start CVRP-POMO Training.")
         trainer = Trainer_pomo(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params, meta_params=meta_params)
     elif meta_params['meta_method'] in ['maml', 'fomaml', 'reptile']:
-        print(">> Start TSP-POMO-{} Training.".format(meta_params['meta_method']))
+        print(">> Start CVRP-POMO-{} Training.".format(meta_params['meta_method']))
         trainer = Trainer_meta(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params, meta_params=meta_params)
     else:
         raise NotImplementedError
@@ -114,8 +115,8 @@ def main():
 def _set_debug_mode():
     global trainer_params
     trainer_params['epochs'] = 2
-    trainer_params['train_episodes'] = 10
-    trainer_params['train_batch_size'] = 4
+    trainer_params['train_episodes'] = 4
+    trainer_params['train_batch_size'] = 2
 
 
 def _print_config():

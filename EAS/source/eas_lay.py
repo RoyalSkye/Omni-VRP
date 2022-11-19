@@ -273,17 +273,16 @@ def run_eas_lay(model, instance_data, problem_size, config, get_episode_data_fn,
             if config.problem == "CVRP":
                 # First Move is given
                 first_action = LongTensor(np.zeros((batch_s, group_s)))  # start from node_0-depot
-                # TODO: CVRP model need to do something?
+                # model_modified(group_state, selected=first_action)  # do nothing for CVRP
                 group_state, reward, done = env.step(first_action)
                 solutions.append(first_action.unsqueeze(2))
                 step += 1
 
             # First/Second Move is given
             second_action = LongTensor(np.arange(group_s) % problem_size)[None, :].expand(batch_s, group_s).clone()
-
             if iter > 0:
                 second_action[:, -1] = incumbent_solutions_expanded[:, step]  # Teacher forcing the imitation learning loss
-            model_modified(group_state, selected=second_action)  # for the first step, set_q1  TODO: check for CVRP model
+            model_modified(group_state, selected=second_action)  # for the first step, set_q1 for TSP, do nothing for CVRP
             group_state, reward, done = env.step(second_action)
             solutions.append(second_action.unsqueeze(2))
             step += 1

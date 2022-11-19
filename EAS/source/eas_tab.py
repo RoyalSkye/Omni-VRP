@@ -71,7 +71,7 @@ def run_eas_tab(model, instance_data, problem_size, config, get_episode_data_fn,
                     last_action = first_action
                 elif config.problem == "CVRP":  # start from node_0-depot
                     first_action = LongTensor(np.zeros((batch_s, group_s)))
-                    # TODO: CVRP model need to do something?
+                    # model(group_state, selected=first_action)  # do nothing for CVRP
                     group_state, reward, done = env.step(first_action)
                     last_action = first_action
 

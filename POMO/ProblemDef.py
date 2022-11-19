@@ -1,10 +1,9 @@
 import os, sys
+import math
 import glob
 import torch
 import pickle
 import numpy as np
-os.chdir(os.path.dirname(os.path.abspath(__file__)))
-sys.path.insert(0, "..")  # for utils
 from utils.functions import show, seed_everything, load_dataset, save_dataset
 
 
@@ -13,15 +12,15 @@ def generate_task_set(meta_params):
     Current setting:
         size: (n,) \in [20, 150]
         distribution: (m, c) \in {(0, 0) + [1-9] * [1, 10, 20, 30, 40, 50]}
-        size_distribution: (n, m, c) \in [30, 50, 70, 90, 110, 130, 150] * {(0, 0) + [2, 4, 6, 8] * [1, 20, 40]}
+        TODO: size_distribution: (n, m, c) \in [20, 150, 5] * {(0, 0) + [1, 3, 5, 7] * [1, 10, 30, 50]}
     """
     if meta_params['data_type'] == "distribution":  # focus on TSP100 with gaussian mixture distributions
         task_set = [(0, 0)] + [(m, c) for m in range(1, 10) for c in [1, 10, 20, 30, 40, 50]]
     elif meta_params['data_type'] == "size":  # focus on uniform distribution with different sizes
         task_set = [(n,) for n in range(20, 151)]
     elif meta_params['data_type'] == "size_distribution":
-        dist_set = [(0, 0)] + [(m, c) for m in [2, 4, 6, 8] for c in [1, 20, 40]]
-        task_set = [(n, m, c) for n in range(30, 151, 20) for (m, c) in dist_set]
+        dist_set = [(0, 0)] + [(m, c) for m in [1, 3, 5, 7] for c in [1, 10, 30, 50]]
+        task_set = [(n, m, c) for n in range(20, 151, 5) for (m, c) in dist_set]
     else:
         raise NotImplementedError
     print(">> Generating training task set: {} tasks with type {}".format(len(task_set), meta_params['data_type']))
@@ -30,32 +29,48 @@ def generate_task_set(meta_params):
     return task_set
 
 
-def get_random_problems(batch_size, problem_size, num_modes=0, cdist=0, distribution='uniform', path=None):
+def get_random_problems(batch_size, problem_size, num_modes=0, cdist=0, distribution='uniform', path=None, problem="tsp"):
     """
     Generate TSP data within range of [0, 1]
     """
+    assert problem in ["tsp", "cvrp"], "Problems not support."
+
     # uniform distribution problems.shape: (batch, problem, 2)
     if distribution == "uniform":
         problems = np.random.uniform(0, 1, [batch_size, problem_size, 2])
         # problems = torch.rand(size=(batch_size, problem_size, 2))
     elif distribution == "gaussian_mixture":
         problems = generate_gaussian_mixture_tsp(batch_size, problem_size, num_modes=num_modes, cdist=cdist)
-    elif distribution in ["uniform_rectangle", "gaussian", "cluster", "diagonal", "tsplib"]:
+    elif distribution in ["uniform_rectangle", "gaussian", "cluster", "diagonal", "tsplib", "cvrplib"]:
         problems = generate_tsp_dist(batch_size, problem_size, distribution)
     else:
         raise NotImplementedError
 
-    # save as <class 'numpy.ndarray'>
+    if problem == "cvrp":
+        depot_xy = np.random.uniform(size=(batch_size, 1, 2))  # shape: (batch, 1, 2)
+        node_demand = np.random.randint(1, 10, size=(batch_size, problem_size))  # (unnormalized) shape: (batch, problem)
+        demand_scaler = math.ceil(30 + problem_size/5) if problem_size >= 20 else 20
+        capacity = np.full(batch_size, demand_scaler)
+
+    # save as List
     if path is not None:
-        with open(os.path.join(path, "tsp{}_{}.pkl".format(problem_size, distribution)), "wb") as f:
-            pickle.dump(problems, f, pickle.HIGHEST_PROTOCOL)
-            problems = problems[: batch_size]
+        if problem == "tsp":
+            with open(os.path.join(path, "tsp{}_{}.pkl".format(problem_size, distribution)), "wb") as f:
+                pickle.dump(problems.tolist(), f, pickle.HIGHEST_PROTOCOL)
+        else:
+            with open(os.path.join(path, "cvrp{}_{}.pkl".format(problem_size, distribution)), "wb") as f:
+                pickle.dump(list(zip(depot_xy.tolist(), problems.tolist(), node_demand.tolist(), capacity.tolist())), f, pickle.HIGHEST_PROTOCOL)  # [(depot_xy, problems, node_demand), ...]
 
     # return tensor
     if not torch.is_tensor(problems):
         problems = torch.Tensor(problems)
+        if problem == "cvrp":
+            depot_xy, node_demand, capacity = torch.Tensor(depot_xy), torch.Tensor(node_demand), torch.Tensor(capacity)
 
-    return problems
+    if problem == "tsp":
+        return problems
+    else:
+        return depot_xy, problems, node_demand, capacity
 
 
 def augment_xy_data_by_8_fold(problems):
@@ -100,8 +115,10 @@ def generate_gaussian_mixture_tsp(dataset_size, graph_size, num_modes=0, cdist=0
         xy = MinMaxScaler().fit_transform(xy)
         return xy
 
-    if num_modes == 0:
+    if num_modes == 0:  # (0, 0) - uniform
         return np.random.uniform(0, 1, [dataset_size, graph_size, 2])
+    elif num_modes == 1 and cdist == 1:  # (1, 1) - gaussian
+        return generate_tsp_dist(dataset_size, graph_size, "gaussian")
     else:
         res = []
         for i in range(dataset_size):
@@ -114,6 +131,7 @@ def generate_tsp_dist(n_samples, n_nodes, distribution):
     Generate tsp instances with different distributions: ["cluster", "uniform_rectangle", "diagonal", "gaussian", "tsplib"]
     from "Generative Adversarial Training for Neural Combinatorial Optimization Models".
     """
+    print(">> Generating datasets: {}-{}-{}".format(n_samples, n_nodes, distribution))
     if distribution == "cluster":  # time-consuming
         x = []
         for i in range(n_samples):
@@ -174,8 +192,8 @@ def generate_tsp_dist(n_samples, n_nodes, distribution):
             x = np.random.multivariate_normal(mean, cov, [1, n_nodes])
             data.append(x)
         x = np.concatenate(data, 0)
-    elif distribution == "tsplib":
-        file_names = glob.glob("../../data/TSP/tsplib/*.tsp")
+    elif distribution in ["tsplib", "cvrplib"]:
+        file_names = glob.glob("../data/TSP/tsplib/*.tsp") if distribution == "tsplib" else glob.glob("../data/CVRP/cvrplib/Vrp-Set-X/*.vrp")
         data = []
         for file_name in file_names:
             with open(file_name, "r") as f:
@@ -231,23 +249,23 @@ if __name__ == "__main__":
     val seed: 2022
     test seed: 2023
     """
-    path = "../../data/TSP"
+    path = "../data/TSP/Size"
     if not os.path.exists(path):
         os.makedirs(path)
     seed_everything(seed=2023)
 
     # var-dist test data
-    # for dist in ["uniform", "uniform_rectangle", "gaussian", "cluster", "diagonal", "tsplib"]:
+    # for dist in ["uniform", "uniform_rectangle", "gaussian", "diagonal", "tsplib", "cluster"]:
     #     print(">> Generating TSP instances following {} distribution!".format(dist))
-    #     get_random_problems(20000, 100, distribution=dist, path=path)
+    #     get_random_problems(15000, 100, distribution=dist, path=path, problem="tsp")
 
     # var-size test data
-    # for s in [300, 500]:
+    # for s in [50, 100, 150, 200, 300, 500, 1000]:
     #     print(">> Generating TSP instances of size {}!".format(s))
-    #     get_random_problems(1000, s, distribution="uniform", path=path)
+    #     get_random_problems(15000, s, distribution="uniform", path=path, problem="tsp")
 
-    data = generate_gaussian_mixture_tsp(dataset_size=64, graph_size=100, num_modes=9, cdist=1)
+    # data = generate_gaussian_mixture_tsp(dataset_size=64, graph_size=100, num_modes=9, cdist=1)
     # data = load_dataset("../../data/TSP/tsp100_cluster.pkl")
     # print(type(data), data.size(), data)
-    x, y = data[0, :, 0].tolist(), data[0, :, -1].tolist()
-    show([x], [y], label=["Gaussian Mixture"], title="TSP100", xdes="x", ydes="y", path="./tsp.pdf")
+    # x, y = data[0, :, 0].tolist(), data[0, :, -1].tolist()
+    # show([x], [y], label=["Gaussian Mixture"], title="TSP100", xdes="x", ydes="y", path="./tsp.pdf")

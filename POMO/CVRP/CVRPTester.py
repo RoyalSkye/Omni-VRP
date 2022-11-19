@@ -4,15 +4,15 @@ from logging import getLogger
 import torch
 from torch.optim import Adam as Optimizer
 
-from TSPEnv import TSPEnv as Env
-from TSPModel import TSPModel as Model
+from CVRPEnv import CVRPEnv as Env
+from CVRPModel import CVRPModel as Model
 
 from TSP_gurobi import solve_all_gurobi
 from utils.utils import *
 from utils.functions import load_dataset, save_dataset
 
 
-class TSPTester:
+class CVRPTester:
     def __init__(self,
                  env_params,
                  model_params,
@@ -26,7 +26,7 @@ class TSPTester:
         self.fine_tune_params = fine_tune_params
 
         # result folder, logger
-        self.logger = getLogger(name='tester')
+        self.logger = getLogger(name='trainer')
         self.result_folder = get_result_folder()
 
         # cuda
@@ -47,7 +47,7 @@ class TSPTester:
         self.score_list, self.aug_score_list, self.gap_list, self.aug_gap_list = [], [], [], []
 
         # load dataset
-        self.test_data = torch.Tensor(load_dataset(tester_params['test_set_path'])[: self.tester_params['test_episodes']])
+        self.test_data = load_dataset(tester_params['test_set_path'])[: self.tester_params['test_episodes']]
         opt_sol = load_dataset(tester_params['test_set_opt_sol_path'])[: self.tester_params['test_episodes']]  # [(obj, route), ...]
         self.opt_sol = [i[0] for i in opt_sol]
 
@@ -56,7 +56,7 @@ class TSPTester:
         checkpoint_fullname = '{path}/checkpoint-{epoch}.pt'.format(**model_load)
         checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
-        # self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])  # TODO: which performance is good? load or not load?
+        # self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.logger.info(">> Model loaded from {}".format(checkpoint_fullname))
 
         # utility
@@ -65,25 +65,12 @@ class TSPTester:
     def run(self):
         start_time = time.time()
         if self.tester_params['test_robustness']:
-            episode = 0
-            test_data = self.test_data
-            opt_sol = [0] * test_data.size(0)
-            while episode < test_data.size(0):
-                remaining = test_data.size(0) - episode
-                batch_size = min(self.tester_params['test_batch_size'], remaining)
-                data = test_data[episode: episode + batch_size]
-                test_data[episode: episode + batch_size], opt_sol[episode: episode + batch_size] = self._generate_x_adv(data, eps=50.0)
-                episode += batch_size
-            self.test_data = test_data.cpu().numpy()
-            self.opt_sol = [i[0] for i in opt_sol]
-            # save the adv dataset
-            filename = os.path.split(self.tester_params['test_set_path'])[-1]
-            save_dataset(self.test_data, './adv_{}'.format(filename))
-            save_dataset(opt_sol, './sol_adv_{}'.format(filename))
+            # How to generate x_adv for CVRP (e.g., discrete demand) is still an open problem.
+            raise NotImplementedError
         if self.fine_tune_params['enable']:
             # fine-tune model on (little) data which has the same distribution of the test dataset (few-shot)
             start = self.tester_params['test_episodes']
-            self.fine_tune_data = torch.Tensor(load_dataset(self.tester_params['test_set_path'])[start: start + self.fine_tune_params['fine_tune_episodes']])
+            self.fine_tune_data = load_dataset(self.tester_params['test_set_path'])[start: start + self.fine_tune_params['fine_tune_episodes']]  # load dataset from file
             self._fine_tune_and_test()
         else:
             # test the model on test dataset (zero-shot)
@@ -107,15 +94,22 @@ class TSPTester:
         while episode < test_num_episode:
             remaining = test_num_episode - episode
             batch_size = min(self.tester_params['test_batch_size'], remaining)
-            score, aug_score, all_score, all_aug_score = self._test_one_batch(self.test_data[episode: episode + batch_size])
+            # load data
+            data = self.test_data[episode: episode + batch_size]
+            depot_xy, node_xy, node_demand, capacity = [i[0] for i in data], [i[1] for i in data], [i[2] for i in data], [i[3] for i in data]
+            depot_xy, node_xy, node_demand, capacity = torch.Tensor(depot_xy), torch.Tensor(node_xy), torch.Tensor(node_demand), torch.Tensor(capacity)
+            node_demand = node_demand / capacity.view(-1, 1)
+            data = (depot_xy, node_xy, node_demand)
+
+            score, aug_score, all_score, all_aug_score = self._test_one_batch(data)
             opt_sol = self.opt_sol[episode: episode + batch_size]
             score_AM.update(score, batch_size)
             aug_score_AM.update(aug_score, batch_size)
             episode += batch_size
             gap = [max(all_score[i].item() - opt_sol[i], 0) / opt_sol[i] * 100 for i in range(batch_size)]
             aug_gap = [max(all_aug_score[i].item() - opt_sol[i], 0) / opt_sol[i] * 100 for i in range(batch_size)]
-            gap_AM.update(sum(gap)/batch_size, batch_size)
-            aug_gap_AM.update(sum(aug_gap)/batch_size, batch_size)
+            gap_AM.update(sum(gap) / batch_size, batch_size)
+            aug_gap_AM.update(sum(aug_gap) / batch_size, batch_size)
 
             if store_res:
                 self.score_list += all_score.tolist()
@@ -147,7 +141,7 @@ class TSPTester:
 
         # Ready
         self.model.eval()
-        batch_size = test_data.size(0)
+        batch_size = test_data[-1].size(0)
         with torch.no_grad():
             self.env.load_problems(batch_size, problems=test_data, aug_factor=aug_factor)
             reset_state, _, _ = self.env.reset()
@@ -188,12 +182,18 @@ class TSPTester:
             # score, aug_score, gap, aug_gap = self._test(store_res=False)
             # score_list.append(score); aug_score_list.append(aug_score)
             # gap_list.append(gap); aug_gap_list.append(aug_gap)
-            self.logger.info("Start fine-tune step {}".format(k+1))
+            self.logger.info("Start fine-tune step {}".format(k + 1))
             episode = 0
             while episode < fine_tune_episode:
                 remaining = fine_tune_episode - episode
                 batch_size = min(self.fine_tune_params['fine_tune_batch_size'], remaining)
-                self._fine_tune_one_batch(self.fine_tune_data[episode:episode+batch_size])
+                # load data
+                data = self.fine_tune_data[episode:episode + batch_size]
+                depot_xy, node_xy, node_demand, capacity = [i[0] for i in data], [i[1] for i in data], [i[2] for i in data], [i[3] for i in data]
+                depot_xy, node_xy, node_demand, capacity = torch.Tensor(depot_xy), torch.Tensor(node_xy), torch.Tensor(node_demand), torch.Tensor(capacity)
+                node_demand = node_demand / capacity.view(-1, 1)
+                data = (depot_xy, node_xy, node_demand)
+                self._fine_tune_one_batch(data)
                 episode += batch_size
 
         score, aug_score, gap, aug_gap = self._test(store_res=True)
@@ -213,7 +213,7 @@ class TSPTester:
             aug_factor = 1
 
         self.model.train()
-        batch_size = fine_tune_data.size(0)
+        batch_size = fine_tune_data[-1].size(0)
         self.env.load_problems(batch_size, problems=fine_tune_data, aug_factor=aug_factor)
         reset_state, _, _ = self.env.reset()
         self.model.pre_forward(reset_state)
@@ -247,45 +247,3 @@ class TSPTester:
         self.optimizer.zero_grad()
         loss_mean.backward()
         self.optimizer.step()
-
-    def _generate_x_adv(self, data, eps=10.0):
-        """
-        Generate adversarial data based on the current model, also need to generate optimal sol for x_adv.
-        """
-        from torch.autograd import Variable
-        def minmax(xy_):
-            # min_max normalization: [b,n,2]
-            xy_ = (xy_ - xy_.min(dim=1, keepdims=True)[0]) / (xy_.max(dim=1, keepdims=True)[0] - xy_.min(dim=1, keepdims=True)[0])
-            return xy_
-
-        # generate x_adv
-        self.model.eval()
-        aug_factor, batch_size = 1, data.size(0)
-        with torch.enable_grad():
-            data.requires_grad_()
-            self.env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
-            # print(self.env.problems.requires_grad)
-            reset_state, _, _ = self.env.reset()
-            self.model.pre_forward(reset_state)
-            prob_list = torch.zeros(size=(aug_factor * batch_size, self.env.pomo_size, 0))
-            state, reward, done = self.env.pre_step()
-            while not done:
-                selected, prob = self.model(state)
-                state, reward, done = self.env.step(selected)
-                prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
-
-            aug_reward = reward.reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
-            baseline_reward = aug_reward.float().mean(dim=1, keepdims=True)
-            advantage = aug_reward - baseline_reward
-            log_prob = prob_list.log().sum(dim=2).reshape(aug_factor, batch_size, self.env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
-
-            # delta = torch.autograd.grad(eps * ((advantage / baseline_reward) * log_prob).mean(), data)[0]
-            delta = torch.autograd.grad(eps * ((-advantage) * log_prob).mean(), data)[0]
-            data = data.detach() + delta
-            data = minmax(data)
-            data = Variable(data, requires_grad=False)
-
-        # generate opt sol
-        opt_sol = solve_all_gurobi(data)
-
-        return data, opt_sol

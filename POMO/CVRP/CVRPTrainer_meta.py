@@ -7,19 +7,18 @@ import torch
 from logging import getLogger
 from collections import OrderedDict
 from torch.optim import Adam as Optimizer
-# from torch.optim import SGD as Optimizer
 
-from TSPEnv import TSPEnv as Env
-from TSPModel import TSPModel as Model
+from CVRPEnv import CVRPEnv as Env
+from CVRPModel import CVRPModel as Model
 from ProblemDef import get_random_problems, generate_task_set
 from utils.utils import *
 from utils.functions import *
-from TSP_baseline import *
+from CVRP_baseline import *
 
 
-class TSPTrainer:
+class CVRPTrainer:
     """
-    Implementation of POMO with MAML / FOMAML / Reptile on TSP.
+    Implementation of POMO with MAML / FOMAML / Reptile on CVRP.
     For MAML & FOMAML, ref to "Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks";
     For Reptile, ref to "On First-Order Meta-Learning Algorithms".
     Refer to "https://lilianweng.github.io/posts/2018-11-30-meta-learning"
@@ -63,7 +62,7 @@ class TSPTrainer:
         self.val_data, self.val_opt = {}, {}  # for lkh3_offline
         if self.meta_params["data_type"] == "size":
             self.min_n, self.max_n, self.task_interval = self.task_set[0][0], self.task_set[-1][0], 5  # [20, 150]
-            self.task_w = {start: 1/(len(self.task_set)//5) for start in range(self.min_n, self.max_n, self.task_interval)}
+            self.task_w = {start: 1 / (len(self.task_set) // 5) for start in range(self.min_n, self.max_n, self.task_interval)}
             # self.task_w = torch.full((len(self.task_set)//self.task_interval,), 1/(len(self.task_set)//self.task_interval))
         elif self.meta_params["data_type"] == "distribution":
             self.task_w = torch.full((len(self.task_set),), 1 / len(self.task_set))
@@ -89,7 +88,7 @@ class TSPTrainer:
 
         start_time, best_mean = time.time(), 1000
         self.time_estimator.reset(self.start_epoch)
-        for epoch in range(self.start_epoch, self.meta_params['epochs']+1):
+        for epoch in range(self.start_epoch, self.meta_params['epochs'] + 1):
             self.logger.info('=================================================================')
 
             # lr decay (by 10) to speed up convergence at 90th and 95th iterations
@@ -108,11 +107,11 @@ class TSPTrainer:
             # Val
             no_aug_score_list = []
             if self.meta_params["data_type"] == "size":
-                dir = "../../data/TSP/Size/"
-                paths = ["tsp100_uniform.pkl", "tsp200_uniform.pkl", "tsp300_uniform.pkl"]
+                dir = "../../data/CVRP/Size/"
+                paths = ["cvrp100_uniform.pkl", "cvrp200_uniform.pkl", "cvrp300_uniform.pkl"]
             elif self.meta_params["data_type"] == "distribution":
-                dir = "../../data/TSP/Distribution/"
-                paths = ["tsp100_uniform.pkl", "tsp100_gaussian.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl", "tsp100_tsplib.pkl"]
+                dir = "../../data/CVRP/Distribution/"
+                paths = ["cvrp100_uniform.pkl", "cvrp100_gaussian.pkl", "cvrp100_cluster.pkl", "cvrp100_diagonal.pkl", "cvrp100_cvrplib.pkl"]
             elif self.meta_params["data_type"] == "size_distribution":
                 pass
             if epoch <= 1 or (epoch % img_save_interval) == 0:
@@ -137,7 +136,7 @@ class TSPTrainer:
             # Logs & Checkpoint
             elapsed_time_str, remain_time_str = self.time_estimator.get_est_string(epoch, self.meta_params['epochs'])
             self.logger.info("Epoch {:3d}/{:3d}({:.2f}%): Time Est.: Elapsed[{}], Remain[{}], Val Score: {}".format(
-                epoch, self.meta_params['epochs'], epoch/self.meta_params['epochs']*100, elapsed_time_str, remain_time_str, no_aug_score_list))
+                epoch, self.meta_params['epochs'], epoch / self.meta_params['epochs'] * 100, elapsed_time_str, remain_time_str, no_aug_score_list))
 
             all_done = (epoch == self.meta_params['epochs'])
 
@@ -158,12 +157,6 @@ class TSPTrainer:
                     'result_log': self.result_log.get_raw_data()
                 }
                 torch.save(checkpoint_dict, '{}/checkpoint-{}.pt'.format(self.result_folder, epoch))
-
-            # if all_done or (epoch % img_save_interval) == 0:
-            #     image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, epoch)
-            #     util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'], self.result_log, labels=['train_score'])
-            #     util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'], self.result_log, labels=['val_score'])
-            #     util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_2'], self.result_log, labels=['train_loss'])
 
             if all_done:
                 self.logger.info(" *** Training Done *** ")
@@ -186,16 +179,8 @@ class TSPTrainer:
             for size: gradually increase the problem size (Curriculum learning);
             for distribution: we compute the relative gaps (w.r.t. LKH3) or estimate the potential improvements of each distribution (i.e., bootstrap) every X iters;
         """
-        if self.meta_params["data_type"] == "size":
-            # start = self.min_n + int(epoch/self.meta_params['sch_epoch'] * (self.max_n - self.min_n))  # linear
-            start = self.min_n + int(1/2 * (1-math.cos(math.pi * min(epoch/self.meta_params['sch_epoch'], 1))) * (self.max_n - self.min_n))  # cosine
-            end = min(start + 10, self.max_n)  # 10 is the size of the sliding window
-            if self.meta_params["curriculum"]: print(">> training task {}".format((start, end)))
-        elif self.meta_params["data_type"] == "distribution":
-            if epoch != 0 and epoch % self.meta_params['update_weight'] == 0:
-                self._update_task_weight(epoch)
-        elif self.meta_params["data_type"] == "size_distribution":
-            pass
+        start, end = 0, 0
+        pass
 
         self._alpha_scheduler(epoch)  # for reptile
         fast_weights, val_loss, meta_grad_dict = [], 0, {(i, j): 0 for i, group in enumerate(self.meta_optimizer.param_groups) for j, _ in enumerate(group['params'])}
@@ -203,15 +188,10 @@ class TSPTrainer:
         for b in range(self.meta_params['B']):
             # sample a task
             if self.meta_params["data_type"] == "size":
-                task_params = random.sample(range(start, end+1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
+                task_params = random.sample(range(start, end + 1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
                 # batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 100 else self.meta_params['meta_batch_size'] // 2
             elif self.meta_params["data_type"] == "distribution":
-                # sample based on task weights
                 task_params = self.task_set[torch.multinomial(self.task_w, 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                # task_params = self.task_set[random.sample(torch.topk(self.task_w, 10)[1].tolist(), 1)[0]] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                # curri: from easy task (small gaps) -> hard task (large gaps)
-                # selected_idx = torch.sort(self.task_w, descending=False)[1].tolist()[start: end]
-                # task_params = self.task_set[random.sample(selected_idx, 1)[0]] if self.meta_params['curriculum'] and epoch >= self.meta_params['update_weight'] else random.sample(self.task_set, 1)[0]
             elif self.meta_params["data_type"] == "size_distribution":
                 pass
 
@@ -226,13 +206,12 @@ class TSPTrainer:
                 else:
                     fast_weight = OrderedDict(self.meta_model.decoder.named_parameters())
                     for k in list(fast_weight.keys()):
-                        fast_weight["decoder."+k] = fast_weight.pop(k)
-                # optimizer = Optimizer(fast_weight.values(), **self.optimizer_params['optimizer'])
+                        fast_weight["decoder." + k] = fast_weight.pop(k)
 
             # inner-loop optimization
             for step in range(self.meta_params['k']):
                 data = self._get_data(batch_size, task_params)
-                env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
+                env_params = {'problem_size': data[-1].size(1), 'pomo_size': data[-1].size(1)}
                 self.meta_model.train()
                 if self.meta_params['meta_method'] in ['reptile', 'fomaml']:
                     avg_score, avg_loss = self._train_one_batch(task_model, data, Env(**env_params), optimizer)
@@ -244,9 +223,6 @@ class TSPTrainer:
             val_data = self._get_val_data(batch_size, task_params)
             self.meta_model.train()
             if self.meta_params['meta_method'] == 'maml':
-                # Old version
-                # val_loss += self._fast_val(fast_weight, data=val_data, mode="maml") / self.meta_params['B']
-                # New version - Save GPU memory
                 val_loss = self._fast_val(fast_weight, data=val_data, mode="maml") / self.meta_params['B']
                 self.meta_optimizer.zero_grad()
                 val_loss.backward()
@@ -265,11 +241,6 @@ class TSPTrainer:
 
         # outer-loop optimization (update meta-model)
         if self.meta_params['meta_method'] == 'maml':
-            # Old version
-            # self.meta_optimizer.zero_grad()
-            # val_loss.backward()
-            # self.meta_optimizer.step()
-            # New version - Save GPU memory
             self.meta_optimizer.zero_grad()
             for i, group in enumerate(self.meta_optimizer.param_groups):
                 for j, p in enumerate(group['params']):
@@ -293,14 +264,14 @@ class TSPTrainer:
     def _train_one_batch(self, task_model, data, env, optimizer=None):
 
         task_model.train()
-        batch_size = data.size(0)
+        batch_size = data[-1].size(0)
         env.load_problems(batch_size, problems=data, aug_factor=1)
         reset_state, _, _ = env.reset()
         task_model.pre_forward(reset_state)
         prob_list = torch.zeros(size=(batch_size, env.pomo_size, 0))
         # shape: (batch, pomo, 0~problem)
 
-        # POMO Rollout, please note that the reward is negative (i.e., -length of route).
+        # POMO Rollout
         state, reward, done = env.pre_step()
         while not done:
             selected, prob = task_model(state)
@@ -331,14 +302,14 @@ class TSPTrainer:
 
     def _train_one_batch_maml(self, fast_weight, data, env, optimizer=None):
 
-        batch_size = data.size(0)
+        batch_size = data[-1].size(0)
         env.load_problems(batch_size, problems=data, aug_factor=1)
         reset_state, _, _ = env.reset()
         self.meta_model.pre_forward(reset_state, weights=fast_weight)
         prob_list = torch.zeros(size=(batch_size, env.pomo_size, 0))
         # shape: (batch, pomo, 0~problem)
 
-        # POMO Rollout, please note that the reward is negative (i.e., -length of route).
+        # POMO Rollout
         state, reward, done = env.pre_step()
         while not done:
             selected, prob = self.meta_model(state, weights=fast_weight)
@@ -389,14 +360,6 @@ class TSPTrainer:
                 param = param - lr * grad
             w_t.append((name, param))
         fast_weight = OrderedDict(w_t)
-        """
-        # 3. update model using optimizer - this method can not work properly.
-        optimizer.zero_grad()
-        # torch.autograd.grad(loss_mean, fast_weight.values(), create_graph=True)
-        # print(list(self.meta_model.parameters())[-1])
-        loss_mean.backward(retain_graph=True, create_graph=True)
-        optimizer.step()  # will update meta_model as well...
-        """
 
         # Score
         max_pomo_reward, _ = reward.max(dim=1)  # get best results from pomo
@@ -407,10 +370,15 @@ class TSPTrainer:
 
     def _fast_val(self, model, data=None, path=None, offset=0, val_episodes=32, mode="eval", return_all=False):
         aug_factor = 1
-        data = torch.Tensor(load_dataset(path)[offset: offset+val_episodes]) if data is None else data
-        env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
+        if data is None:
+            data = load_dataset(path)[offset: offset + val_episodes]  # load dataset from file
+            depot_xy, node_xy, node_demand, capacity = [i[0] for i in data], [i[1] for i in data], [i[2] for i in data], [i[3] for i in data]
+            depot_xy, node_xy, node_demand, capacity = torch.Tensor(depot_xy), torch.Tensor(node_xy), torch.Tensor(node_demand), torch.Tensor(capacity)
+            node_demand = node_demand / capacity.view(-1, 1)
+            data = (depot_xy, node_xy, node_demand)
+        env = Env(**{'problem_size': data[-1].size(1), 'pomo_size': data[-1].size(1)})
 
-        batch_size = data.size(0)
+        batch_size = data[-1].size(0)
         if mode == "eval":
             model.eval()
             with torch.no_grad():
@@ -467,31 +435,25 @@ class TSPTrainer:
 
     def _bootstrap(self, fast_weight, data, mode="eval"):
         """
-        mode = "maml": Ref to "Bootstrap Meta-Learning", ICLR 2022;
+        mode = "maml": Ref to "Bootstrap Meta-Learning", ICLR 2022 (not implemented for CVRP);
         mode = "eval": Used to update task weights.
         """
+        assert mode in ["eval"], "{} not implemented!".format(mode)
         bootstrap_weight = fast_weight
-        batch_size, aug_factor = data.size(0), 1
+        batch_size, aug_factor = data[-1].size(0), 1
         bootstrap_reward = torch.full((batch_size, 1), float("-inf"))
-        if mode == "eval":
-            optimizer = Optimizer(bootstrap_weight.parameters(), **self.optimizer_params['optimizer'])
-            # optimizer.load_state_dict(self.meta_optimizer.state_dict())
+        optimizer = Optimizer(bootstrap_weight.parameters(), **self.optimizer_params['optimizer'])
+        # optimizer.load_state_dict(self.meta_optimizer.state_dict())
         with torch.enable_grad():
             for L in range(self.meta_params['bootstrap_steps']):
-                env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
+                env = Env(**{'problem_size': data[-1].size(1), 'pomo_size': data[-1].size(1)})
                 env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
                 reset_state, _, _ = env.reset()
-                if mode == "maml":
-                    self.meta_model.pre_forward(reset_state, weights=bootstrap_weight)
-                elif mode == "eval":
-                    bootstrap_weight.pre_forward(reset_state)
+                bootstrap_weight.pre_forward(reset_state)
                 prob_list = torch.zeros(size=(aug_factor * batch_size, env.pomo_size, 0))
                 state, reward, done = env.pre_step()
                 while not done:
-                    if mode == "maml":
-                        selected, prob = self.meta_model(state, weights=bootstrap_weight)
-                    elif mode == "eval":
-                        selected, prob = bootstrap_weight(state)
+                    selected, prob = bootstrap_weight(state)
                     state, reward, done = env.step(selected)  # (aug_factor * batch_size, pomo_size)
                     prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
 
@@ -502,18 +464,9 @@ class TSPTrainer:
                 loss = -advantage * log_prob
                 loss_mean = loss.mean()
 
-                if mode == "maml":
-                    # TODO: need to update, SGD -> Adam
-                    gradients = torch.autograd.grad(loss_mean, bootstrap_weight.values(), create_graph=False)
-                    bootstrap_weight = OrderedDict(
-                        (name, param - self.optimizer_params['optimizer']['lr'] * grad)
-                        for ((name, param), grad) in zip(bootstrap_weight.items(), gradients)
-                    )
-                    raise NotImplementedError
-                elif mode == "eval":
-                    optimizer.zero_grad()
-                    loss_mean.backward()
-                    optimizer.step()
+                optimizer.zero_grad()
+                loss_mean.backward()
+                optimizer.step()
 
                 max_pomo_reward, _ = reward.max(dim=1)
                 max_pomo_reward = max_pomo_reward.view(-1, 1)
@@ -522,17 +475,30 @@ class TSPTrainer:
         return bootstrap_reward
 
     def _get_data(self, batch_size, task_params):
-        if self.meta_params['data_type'] == 'size':
-            assert len(task_params) == 1
-            data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform', problem="tsp")
-        elif self.meta_params['data_type'] == 'distribution':
+        """
+        Return CVRP data with the form of:
+        depot_xy: [batch_size, 1, 2]
+        node_xy: [batch_size, problem_size, 2]
+        node_demand (unnormalized): [batch_size, problem_size]
+        capacity: [batch_size]
+        """
+        if self.meta_params['data_type'] == 'distribution':
             assert len(task_params) == 2
-            data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[1], distribution='gaussian_mixture', problem="tsp")
+            data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[1], distribution='gaussian_mixture', problem="cvrp")
+        elif self.meta_params['data_type'] == 'size':
+            assert len(task_params) == 1
+            data = get_random_problems(batch_size, task_params[0], num_modes=0, cdist=0, distribution='uniform', problem="cvrp")
         elif self.meta_params['data_type'] == "size_distribution":
             assert len(task_params) == 3
-            data = get_random_problems(batch_size, task_params[0], num_modes=task_params[1], cdist=task_params[2], distribution='gaussian_mixture', problem="tsp")
+            data = get_random_problems(batch_size, task_params[0], num_modes=task_params[1], cdist=task_params[2], distribution='gaussian_mixture', problem="cvrp")
         else:
             raise NotImplementedError
+
+        # normalized node_demand by capacity & only return (depot_xy, node_xy, node_demand)
+        if len(data) == 4:
+            depot_xy, node_xy, node_demand, capacity = data
+            node_demand = node_demand / capacity.view(-1, 1)
+            data = (depot_xy, node_xy, node_demand)
 
         return data
 
@@ -557,123 +523,5 @@ class TSPTrainer:
         """
         self.alpha = max(self.alpha * self.meta_params['alpha_decay'], 0.0001)
 
-    def _generate_x_adv(self, data, eps=10.0):
-        """
-        Generate adversarial data based on the current model, also need to generate optimal sol for x_adv.
-        See also: "Learning to Solve Travelling Salesman Problem with Hardness-adaptive Curriculum" in AAAI 2022.
-        """
-        from torch.autograd import Variable
-        def minmax(xy_):
-            # min_max normalization: [b,n,2]
-            xy_ = (xy_ - xy_.min(dim=1, keepdims=True)[0]) / (xy_.max(dim=1, keepdims=True)[0] - xy_.min(dim=1, keepdims=True)[0])
-            return xy_
-
-        if eps == 0: return data
-        # generate x_adv
-        self.meta_model.eval()
-        aug_factor, batch_size = 1, data.size(0)
-        env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
-        with torch.enable_grad():
-            data.requires_grad_()
-            env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
-            reset_state, _, _ = env.reset()
-            self.meta_model.pre_forward(reset_state)
-            prob_list = torch.zeros(size=(aug_factor * batch_size, env.pomo_size, 0))
-            state, reward, done = env.pre_step()
-            while not done:
-                selected, prob = self.meta_model(state)
-                state, reward, done = env.step(selected)
-                prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
-
-            aug_reward = reward.reshape(aug_factor, batch_size, env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
-            baseline_reward = aug_reward.float().mean(dim=1, keepdims=True)
-            advantage = aug_reward - baseline_reward
-            log_prob = prob_list.log().sum(dim=2).reshape(aug_factor, batch_size, env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
-
-            # delta = torch.autograd.grad(eps * ((advantage / baseline_reward) * log_prob).mean(), data)[0]
-            delta = torch.autograd.grad(eps * ((-advantage) * log_prob).mean(), data)[0]
-            data = data.detach() + delta
-            data = minmax(data)
-            data = Variable(data, requires_grad=False)
-
-        # generate opt sol
-        # opt_sol = solve_all_gurobi(data)
-        # return data, opt_sol
-
-        return data
-
     def _update_task_weight(self, epoch):
-        """
-        Update the weights of tasks.
-        """
-        global run_func
-        start_t, gap = time.time(), torch.zeros(self.task_w.size(0))
-        batch_size = 200 if self.meta_params["solver"] == "lkh3_offline" else 50
-        idx = torch.randperm(batch_size)[:50]
-        for i in range(gap.size(0)):
-            if self.meta_params["data_type"] == "size":
-                start = i * self.task_interval
-                end = min(start + self.task_interval, self.max_n)
-                selected = random.sample([j for j in range(start, end+1)], 1)[0]
-                data = self._get_data(batch_size=batch_size, task_params=(selected, ))
-            elif self.meta_params["data_type"] == "distribution":
-                selected = self.task_set[i]
-                data = self._get_data(batch_size=batch_size, task_params=selected)
-            else:
-                raise NotImplementedError
-
-            # only use lkh3 at the first iteration of updating task weights
-            if self.meta_params["solver"] == "lkh3_offline":
-                if epoch / self.meta_params['update_weight'] == 1:
-                    self.val_data[i] = data
-                    opts = argparse.ArgumentParser()
-                    opts.cpus, opts.n, opts.progress_bar_mininterval = None, None, 0.1
-                    dataset = [(instance.cpu().numpy(),) for instance in data]
-                    executable = get_lkh_executable()
-                    def run_func(args):
-                        return solve_lkh_log(executable, *args, runs=1, disable_cache=True)  # otherwise it directly loads data from dir
-                    results, _ = run_all_in_pool(run_func, "./LKH3_result", dataset, opts, use_multiprocessing=False)
-                    self.val_opt[i] = [j[0] for j in results]
-                data = self.val_data[i][idx]
-
-            model_score = self._fast_val(self.meta_model, data=data, mode="eval", return_all=True)
-            model_score = model_score.tolist()
-
-            if self.meta_params["solver"] == "lkh3_online":
-                # get results from LKH3 (~14s)
-                opts = argparse.ArgumentParser()
-                opts.cpus, opts.n, opts.progress_bar_mininterval = None, None, 0.1
-                dataset = [(instance.cpu().numpy(),) for instance in data]
-                executable = get_lkh_executable()
-                def run_func(args):
-                    return solve_lkh_log(executable, *args, runs=1, disable_cache=True)  # otherwise it directly loads data from dir
-                results, _ = run_all_in_pool(run_func, "./LKH3_result", dataset, opts, use_multiprocessing=False)
-                gap_list = [(model_score[j]-results[j][0])/results[j][0]*100 for j in range(len(results))]
-                gap[i] = sum(gap_list)/len(gap_list)
-            elif self.meta_params["solver"] == "lkh3_offline":
-                lkh_score = [self.val_opt[i][j] for j in idx.tolist()]
-                gap_list = [(model_score[j] - lkh_score[j]) / lkh_score[j] * 100 for j in range(len(lkh_score))]
-                gap[i] = sum(gap_list) / len(gap_list)
-            elif self.meta_params["solver"] == "best_model":  # not recommend: how to define the best model? (biased to the val dataset)
-                best_model_score = self._fast_val(self.best_meta_model, data=data, mode="eval", return_all=True)
-                best_model_score = best_model_score.tolist()
-                gap_list = [(model_score[j] - best_model_score[j]) / best_model_score[j] * 100 for j in range(len(best_model_score))]
-                gap[i] = sum(gap_list) / len(gap_list)
-            elif self.meta_params["solver"] == "bootstrap":
-                data = data[:32] if data.size(1) > 100 else data  # reduce memory consumption
-                bootstrap_reward = self._bootstrap(copy.deepcopy(self.meta_model), data, mode="eval")
-                bootstrap_score = (-bootstrap_reward).view(-1).float().tolist()
-                gap_list = [(model_score[j] - bootstrap_score[j]) / bootstrap_score[j] * 100 for j in range(len(bootstrap_score))]
-                gap[i] = sum(gap_list) / len(gap_list)
-            else:
-                raise NotImplementedError
-        print(">> Finish updating task weights within {}s".format(round(time.time()-start_t, 2)))
-
-        # temp = max(1.0 * (1 - epoch / self.meta_params["sch_epoch"]), 0.05)
-        # temp = max(1.0 - 1/2 * (1 - math.cos(math.pi * min(epoch / self.meta_params['sch_epoch'], 1))), 0.2)
-        temp = 0.25
-        gap_temp = torch.Tensor([i/temp for i in gap.tolist()])
-        print(gap, temp)
-        print(">> Old task weights: {}".format(self.task_w))
-        self.task_w = torch.softmax(gap_temp, dim=0)
-        print(">> New task weights: {}".format(self.task_w))
+        pass

@@ -4,42 +4,61 @@ import torch.nn as nn
 import torch.nn.functional as F
 
 
-class TSPModel(nn.Module):
+class CVRPModel(nn.Module):
 
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
 
-        self.encoder = TSP_Encoder(**model_params)  # 1187712 (1.19 million)
-        self.decoder = TSP_Decoder(**model_params)  # 82048 (0.08 million)
+        self.encoder = CVRP_Encoder(**model_params)
+        self.decoder = CVRP_Decoder(**model_params)
         self.encoded_nodes = None
-        # shape: (batch, problem, EMBEDDING_DIM)
+        # shape: (batch, problem+1, EMBEDDING_DIM)
 
     def pre_forward(self, reset_state, weights=None):
+        depot_xy = reset_state.depot_xy
+        # shape: (batch, 1, 2)
+        node_xy = reset_state.node_xy
+        # shape: (batch, problem, 2)
+        node_demand = reset_state.node_demand
+        # shape: (batch, problem)
+        node_xy_demand = torch.cat((node_xy, node_demand[:, :, None]), dim=2)
+        # shape: (batch, problem, 3)
+
         if weights is not None and self.model_params["meta_update_encoder"]:
-            self.encoded_nodes = self.encoder(reset_state.problems, weights=weights)
+            self.encoded_nodes = self.encoder(depot_xy, node_xy_demand, weights=weights)
         else:
-            self.encoded_nodes = self.encoder(reset_state.problems, weights=None)
-        # shape: (batch, problem, EMBEDDING_DIM)
+            self.encoded_nodes = self.encoder(depot_xy, node_xy_demand, weights=None)
+        # shape: (batch, problem+1, embedding)
         self.decoder.set_kv(self.encoded_nodes, weights=weights)
 
     def forward(self, state, weights=None):
         batch_size = state.BATCH_IDX.size(0)
         pomo_size = state.BATCH_IDX.size(1)
 
-        if state.current_node is None:
-            selected = torch.arange(pomo_size)[None, :].expand(batch_size, pomo_size)  # for torch.gather(dim=1)
+        if state.selected_count == 0:  # First Move, depot
+            selected = torch.zeros(size=(batch_size, pomo_size), dtype=torch.long)
             prob = torch.ones(size=(batch_size, pomo_size))
 
-            encoded_first_node = _get_encoding(self.encoded_nodes, selected)
-            # shape: (batch, pomo, embedding)
-            self.decoder.set_q1(encoded_first_node, weights=weights)  # pre-compute fixed part of the context embedding
+            # # Use Averaged encoded nodes for decoder input_1
+            # encoded_nodes_mean = self.encoded_nodes.mean(dim=1, keepdim=True)
+            # # shape: (batch, 1, embedding)
+            # self.decoder.set_q1(encoded_nodes_mean, weights=weights)
+
+            # # Use encoded_depot for decoder input_2
+            # encoded_first_node = self.encoded_nodes[:, [0], :]
+            # # shape: (batch, 1, embedding)
+            # self.decoder.set_q2(encoded_first_node, weights=weights)
+
+        elif state.selected_count == 1:  # Second Move, POMO
+            selected = torch.arange(start=1, end=pomo_size+1)[None, :].expand(batch_size, pomo_size)
+            prob = torch.ones(size=(batch_size, pomo_size))
 
         else:
             encoded_last_node = _get_encoding(self.encoded_nodes, state.current_node)
             # shape: (batch, pomo, embedding)
-            probs = self.decoder(encoded_last_node, ninf_mask=state.ninf_mask, weights=weights)
-            # shape: (batch, pomo, problem)
+            probs = self.decoder(encoded_last_node, state.load, ninf_mask=state.ninf_mask, weights=weights)
+            # shape: (batch, pomo, problem+1)
 
             while True:
                 if self.training or self.model_params['eval_type'] == 'softmax':
@@ -79,31 +98,38 @@ def _get_encoding(encoded_nodes, node_index_to_pick):
 # ENCODER
 ########################################
 
-class TSP_Encoder(nn.Module):
+class CVRP_Encoder(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
         embedding_dim = self.model_params['embedding_dim']
         encoder_layer_num = self.model_params['encoder_layer_num']
 
-        self.embedding = nn.Linear(2, embedding_dim)
+        self.embedding_depot = nn.Linear(2, embedding_dim)
+        self.embedding_node = nn.Linear(3, embedding_dim)
         self.layers = nn.ModuleList([EncoderLayer(**model_params) for _ in range(encoder_layer_num)])
 
-    def forward(self, data, weights=None):
+    def forward(self, depot_xy, node_xy_demand, weights=None):
+        # depot_xy.shape: (batch, 1, 2)
+        # node_xy_demand.shape: (batch, problem, 3)
         if weights is None:
-            # data.shape: (batch, problem, 2)
-            embedded_input = self.embedding(data)
+            embedded_depot = self.embedding_depot(depot_xy)
+            # shape: (batch, 1, embedding)
+            embedded_node = self.embedding_node(node_xy_demand)
             # shape: (batch, problem, embedding)
-            out = embedded_input
+            out = torch.cat((embedded_depot, embedded_node), dim=1)
+            # shape: (batch, problem+1, embedding)
             for layer in self.layers:
                 out = layer(out)
         else:
-            embedded_input = F.linear(data, weights['encoder.embedding.weight'], weights['encoder.embedding.bias'])
-            out = embedded_input
+            embedded_depot = F.linear(depot_xy, weights['encoder.embedding_depot.weight'], weights['encoder.embedding_depot.bias'])
+            embedded_node = F.linear(node_xy_demand, weights['encoder.embedding_node.weight'], weights['encoder.embedding_node.bias'])
+            out = torch.cat((embedded_depot, embedded_node), dim=1)
             for idx, layer in enumerate(self.layers):
                 out = layer(out, weights=weights, index=idx)
 
         return out
+        # shape: (batch, problem+1, embedding)
 
 
 class EncoderLayer(nn.Module):
@@ -119,25 +145,25 @@ class EncoderLayer(nn.Module):
         self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         self.multi_head_combine = nn.Linear(head_num * qkv_dim, embedding_dim)
 
-        self.addAndNormalization1 = Add_And_Normalization_Module(**model_params)
-        self.feedForward = Feed_Forward_Module(**model_params)
-        self.addAndNormalization2 = Add_And_Normalization_Module(**model_params)
+        self.add_n_normalization_1 = Add_And_Normalization_Module(**model_params)
+        self.feed_forward = FeedForward(**model_params)
+        self.add_n_normalization_2 = Add_And_Normalization_Module(**model_params)
 
     def forward(self, input1, weights=None, index=0):
-        # input1.shape: (batch, problem, EMBEDDING_DIM)
+        # input1.shape: (batch, problem+1, embedding)
         if weights is None:
             head_num = self.model_params['head_num']
             q = reshape_by_heads(self.Wq(input1), head_num=head_num)
             k = reshape_by_heads(self.Wk(input1), head_num=head_num)
             v = reshape_by_heads(self.Wv(input1), head_num=head_num)
-            # q shape: (batch, HEAD_NUM, problem, KEY_DIM)
+            # qkv shape: (batch, head_num, problem, qkv_dim)
             out_concat = multi_head_attention(q, k, v)
-            # shape: (batch, problem, HEAD_NUM*KEY_DIM)
+            # shape: (batch, problem, head_num*qkv_dim)
             multi_head_out = self.multi_head_combine(out_concat)
-            # shape: (batch, problem, EMBEDDING_DIM)
-            out1 = self.addAndNormalization1(input1, multi_head_out)
-            out2 = self.feedForward(out1)
-            out3 = self.addAndNormalization2(out1, out2)
+            # shape: (batch, problem, embedding)
+            out1 = self.add_n_normalization_1(input1, multi_head_out)
+            out2 = self.feed_forward(out1)
+            out3 = self.add_n_normalization_2(out1, out2)
         else:
             head_num = self.model_params['head_num']
             q = reshape_by_heads(F.linear(input1, weights['encoder.layers.{}.Wq.weight'.format(index)], bias=None), head_num=head_num)
@@ -146,25 +172,25 @@ class EncoderLayer(nn.Module):
             out_concat = multi_head_attention(q, k, v)
             multi_head_out = F.linear(out_concat, weights['encoder.layers.{}.multi_head_combine.weight'.format(index)], weights['encoder.layers.{}.multi_head_combine.bias'.format(index)])
             if self.model_params['norm'] is None:
-                out1 = self.addAndNormalization1(input1, multi_head_out)
+                out1 = self.add_n_normalization_1(input1, multi_head_out)
             else:
-                out1 = self.addAndNormalization1(input1, multi_head_out, weights={'weight': weights['encoder.layers.{}.addAndNormalization1.norm.weight'.format(index)], 'bias': weights['encoder.layers.{}.addAndNormalization1.norm.bias'.format(index)]})
-            out2 = self.feedForward(out1, weights={'weight1': weights['encoder.layers.{}.feedForward.W1.weight'.format(index)], 'bias1': weights['encoder.layers.{}.feedForward.W1.bias'.format(index)],
-                                                   'weight2': weights['encoder.layers.{}.feedForward.W2.weight'.format(index)], 'bias2': weights['encoder.layers.{}.feedForward.W2.bias'.format(index)]})
+                out1 = self.add_n_normalization_1(input1, multi_head_out, weights={'weight': weights['encoder.layers.{}.add_n_normalization_1.norm.weight'.format(index)], 'bias': weights['encoder.layers.{}.add_n_normalization_1.norm.bias'.format(index)]})
+            out2 = self.feed_forward(out1, weights={'weight1': weights['encoder.layers.{}.feed_forward.W1.weight'.format(index)], 'bias1': weights['encoder.layers.{}.feed_forward.W1.bias'.format(index)],
+                                                    'weight2': weights['encoder.layers.{}.feed_forward.W2.weight'.format(index)], 'bias2': weights['encoder.layers.{}.feed_forward.W2.bias'.format(index)]})
             if self.model_params['norm'] is None:
-                out3 = self.addAndNormalization2(out1, out2)
+                out3 = self.add_n_normalization_2(out1, out2)
             else:
-                out3 = self.addAndNormalization2(out1, out2, weights={'weight': weights['encoder.layers.{}.addAndNormalization2.norm.weight'.format(index)], 'bias': weights['encoder.layers.{}.addAndNormalization2.norm.bias'.format(index)]})
+                out3 = self.add_n_normalization_2(out1, out2, weights={'weight': weights['encoder.layers.{}.add_n_normalization_2.norm.weight'.format(index)], 'bias': weights['encoder.layers.{}.add_n_normalization_2.norm.bias'.format(index)]})
 
         return out3
-        # shape: (batch, problem, EMBEDDING_DIM)
+        # shape: (batch, problem, embedding)
 
 
 ########################################
 # DECODER
 ########################################
 
-class TSP_Decoder(nn.Module):
+class CVRP_Decoder(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         self.model_params = model_params
@@ -172,8 +198,9 @@ class TSP_Decoder(nn.Module):
         head_num = self.model_params['head_num']
         qkv_dim = self.model_params['qkv_dim']
 
-        self.Wq_first = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
-        self.Wq_last = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        # self.Wq_1 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        # self.Wq_2 = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
+        self.Wq_last = nn.Linear(embedding_dim+1, head_num * qkv_dim, bias=False)
         self.Wk = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
         self.Wv = nn.Linear(embedding_dim, head_num * qkv_dim, bias=False)
 
@@ -182,17 +209,18 @@ class TSP_Decoder(nn.Module):
         self.k = None  # saved key, for multi-head attention
         self.v = None  # saved value, for multi-head_attention
         self.single_head_key = None  # saved, for single-head attention
-        self.q_first = None  # saved q1, for multi-head attention
+        # self.q1 = None  # saved q1, for multi-head attention
+        # self.q2 = None  # saved q2, for multi-head attention
 
     def set_kv(self, encoded_nodes, weights=None):
+        # encoded_nodes.shape: (batch, problem+1, embedding)
         if weights is None:
-            # encoded_nodes.shape: (batch, problem, embedding)
             head_num = self.model_params['head_num']
             self.k = reshape_by_heads(self.Wk(encoded_nodes), head_num=head_num)
             self.v = reshape_by_heads(self.Wv(encoded_nodes), head_num=head_num)
-            # shape: (batch, head_num, pomo, qkv_dim)
+            # shape: (batch, head_num, problem+1, qkv_dim)
             self.single_head_key = encoded_nodes.transpose(1, 2)
-            # shape: (batch, embedding, problem)
+            # shape: (batch, embedding, problem+1)
         else:
             head_num = self.model_params['head_num']
             self.k = reshape_by_heads(F.linear(encoded_nodes, weights['decoder.Wk.weight'], bias=None), head_num=head_num)
@@ -200,25 +228,38 @@ class TSP_Decoder(nn.Module):
             self.single_head_key = encoded_nodes.transpose(1, 2)
 
     def set_q1(self, encoded_q1, weights=None):
+        # encoded_q.shape: (batch, n, embedding)  # n can be 1 or pomo
+        head_num = self.model_params['head_num']
         if weights is None:
-            # encoded_q.shape: (batch, n, embedding)  # n can be 1 or pomo
-            head_num = self.model_params['head_num']
-            self.q_first = reshape_by_heads(self.Wq_first(encoded_q1), head_num=head_num)
+            self.q1 = reshape_by_heads(self.Wq_1(encoded_q1), head_num=head_num)
             # shape: (batch, head_num, n, qkv_dim)
         else:
-            head_num = self.model_params['head_num']
-            self.q_first = reshape_by_heads(F.linear(encoded_q1, weights['decoder.Wq_first.weight'], bias=None), head_num=head_num)
+            self.q1 = reshape_by_heads(F.linear(encoded_q1, weights['decoder.Wq_1.weight'], bias=None), head_num=head_num)
 
-    def forward(self, encoded_last_node, ninf_mask, weights=None):
+    def set_q2(self, encoded_q2, weights=None):
+        # encoded_q.shape: (batch, n, embedding)  # n can be 1 or pomo
+        head_num = self.model_params['head_num']
+        if weights is None:
+            self.q2 = reshape_by_heads(self.Wq_2(encoded_q2), head_num=head_num)
+            # shape: (batch, head_num, n, qkv_dim)
+        else:
+            self.q2 = reshape_by_heads(F.linear(encoded_q2, weights['decoder.Wq_2.weight'], bias=None), head_num=head_num)
+
+    def forward(self, encoded_last_node, load, ninf_mask, weights=None):
         # encoded_last_node.shape: (batch, pomo, embedding)
+        # load.shape: (batch, pomo)
         # ninf_mask.shape: (batch, pomo, problem)
         if weights is None:
             head_num = self.model_params['head_num']
             #  Multi-Head Attention
             #######################################################
-            q_last = reshape_by_heads(self.Wq_last(encoded_last_node), head_num=head_num)
+            input_cat = torch.cat((encoded_last_node, load[:, :, None]), dim=2)
+            # shape = (batch, group, EMBEDDING_DIM+1)
+            q_last = reshape_by_heads(self.Wq_last(input_cat), head_num=head_num)
             # shape: (batch, head_num, pomo, qkv_dim)
-            q = self.q_first + q_last
+            # q = self.q1 + self.q2 + q_last
+            # # shape: (batch, head_num, pomo, qkv_dim)
+            q = q_last
             # shape: (batch, head_num, pomo, qkv_dim)
             out_concat = multi_head_attention(q, self.k, self.v, rank3_ninf_mask=ninf_mask)
             # shape: (batch, pomo, head_num*qkv_dim)
@@ -238,8 +279,9 @@ class TSP_Decoder(nn.Module):
             # shape: (batch, pomo, problem)
         else:
             head_num = self.model_params['head_num']
-            q_last = reshape_by_heads(F.linear(encoded_last_node, weights['decoder.Wq_last.weight'], bias=None), head_num=head_num)
-            q = self.q_first + q_last
+            input_cat = torch.cat((encoded_last_node, load[:, :, None]), dim=2)
+            q_last = reshape_by_heads(F.linear(input_cat, weights['decoder.Wq_last.weight'], bias=None), head_num=head_num)
+            q = q_last
             out_concat = multi_head_attention(q, self.k, self.v, rank3_ninf_mask=ninf_mask)
             mh_atten_out = F.linear(out_concat, weights['decoder.multi_head_combine.weight'], weights['decoder.multi_head_combine.bias'])
             score = torch.matmul(mh_atten_out, self.single_head_key)
@@ -332,9 +374,9 @@ class Add_And_Normalization_Module(nn.Module):
                 back_trans = normalized.transpose(1, 2)
                 # shape: (batch, problem, embedding)
             elif isinstance(self.norm, nn.BatchNorm1d):
-                batch, problem, embedding = added.size()
-                normalized = self.norm(added.reshape(batch * problem, embedding))
-                back_trans = normalized.reshape(batch, problem, embedding)
+                batch_s, problem_s, embedding_dim = input1.size(0), input1.size(1), input1.size(2)
+                normalized = self.norm(added.reshape(batch_s * problem_s, embedding_dim))
+                back_trans = normalized.reshape(batch_s, problem_s, embedding_dim)
             else:
                 back_trans = added
         else:
@@ -344,16 +386,16 @@ class Add_And_Normalization_Module(nn.Module):
                 normalized = F.instance_norm(transposed, weight=weights['weight'], bias=weights['bias'])
                 back_trans = normalized.transpose(1, 2)
             elif isinstance(self.norm, nn.BatchNorm1d):
-                batch, problem, embedding = added.size()
-                normalized = F.batch_norm(added.reshape(batch * problem, embedding), running_mean=self.norm.running_mean, running_var=self.norm.running_var, weight=weights['weight'], bias=weights['bias'], training=True)
-                back_trans = normalized.reshape(batch, problem, embedding)
+                batch_s, problem_s, embedding_dim = input1.size(0), input1.size(1), input1.size(2)
+                normalized = F.batch_norm(added.reshape(batch_s * problem_s, embedding_dim), running_mean=self.norm.running_mean, running_var=self.norm.running_var, weight=weights['weight'], bias=weights['bias'], training=True)
+                back_trans = normalized.reshape(batch_s, problem_s, embedding_dim)
             else:
                 back_trans = added
 
         return back_trans
 
 
-class Feed_Forward_Module(nn.Module):
+class FeedForward(nn.Module):
     def __init__(self, **model_params):
         super().__init__()
         embedding_dim = model_params['embedding_dim']

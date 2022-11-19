@@ -28,9 +28,9 @@ class TSPModel(nn.Module):
         else:
             encoded_last_node = _get_encoding(self.encoded_nodes, state.current_node)
             # shape: (batch, pomo, embedding)
-            prob = self.decoder(encoded_last_node, ninf_mask=state.ninf_mask)
+            probs = self.decoder(encoded_last_node, ninf_mask=state.ninf_mask)
             # shape: (batch, pomo, problem)
-            return prob
+            return probs
 
 
 def _get_encoding(encoded_nodes, node_index_to_pick):
