@@ -12,15 +12,15 @@ def generate_task_set(meta_params):
     Current setting:
         size: (n,) \in [20, 150]
         distribution: (m, c) \in {(0, 0) + [1-9] * [1, 10, 20, 30, 40, 50]}
-        TODO: size_distribution: (n, m, c) \in [20, 150, 5] * {(0, 0) + [1, 3, 5, 7] * [1, 10, 30, 50]}
+        size_distribution: (n, m, c) \in [50, 200, 5] * {(0, 0) + (1, 1) + [3, 5, 7] * [10, 30, 50]}
     """
     if meta_params['data_type'] == "distribution":  # focus on TSP100 with gaussian mixture distributions
         task_set = [(0, 0)] + [(m, c) for m in range(1, 10) for c in [1, 10, 20, 30, 40, 50]]
     elif meta_params['data_type'] == "size":  # focus on uniform distribution with different sizes
         task_set = [(n,) for n in range(20, 151)]
     elif meta_params['data_type'] == "size_distribution":
-        dist_set = [(0, 0)] + [(m, c) for m in [1, 3, 5, 7] for c in [1, 10, 30, 50]]
-        task_set = [(n, m, c) for n in range(20, 151, 5) for (m, c) in dist_set]
+        dist_set = [(0, 0), (1, 1)] + [(m, c) for m in [3, 5, 7] for c in [10, 30, 50]]
+        task_set = [(n, m, c) for n in range(50, 201, 5) for (m, c) in dist_set]
     else:
         raise NotImplementedError
     print(">> Generating training task set: {} tasks with type {}".format(len(task_set), meta_params['data_type']))
@@ -249,23 +249,26 @@ if __name__ == "__main__":
     val seed: 2022
     test seed: 2023
     """
-    path = "../data/TSP/Size"
+    path = "../data/CVRP/Size_Distribution"
     if not os.path.exists(path):
         os.makedirs(path)
     seed_everything(seed=2023)
 
-    # var-dist test data
-    # for dist in ["uniform", "uniform_rectangle", "gaussian", "diagonal", "tsplib", "cluster"]:
-    #     print(">> Generating TSP instances following {} distribution!".format(dist))
-    #     get_random_problems(15000, 100, distribution=dist, path=path, problem="tsp")
+    # test data for Table 1
+    # for s in [100, 150, 200]:
+    #     for dist in ["uniform", "gaussian"]:
+    #         print(">> Generating TSP instances following {} distribution!".format(dist))
+    #         get_random_problems(15000, s, distribution=dist, path=path, problem="cvrp")
 
     # var-size test data
     # for s in [50, 100, 150, 200, 300, 500, 1000]:
     #     print(">> Generating TSP instances of size {}!".format(s))
     #     get_random_problems(15000, s, distribution="uniform", path=path, problem="tsp")
 
-    # data = generate_gaussian_mixture_tsp(dataset_size=64, graph_size=100, num_modes=9, cdist=1)
-    # data = load_dataset("../../data/TSP/tsp100_cluster.pkl")
+    # data = generate_gaussian_mixture_tsp(dataset_size=1, graph_size=150, num_modes=3, cdist=10)
+    data = load_dataset("../data/CVRP/Size_Distribution/cvrp100_uniform.pkl")
+    print(data[0])
     # print(type(data), data.size(), data)
+    # x, y = [i[0] for i in data[1]], [i[-1] for i in data[1]]
     # x, y = data[0, :, 0].tolist(), data[0, :, -1].tolist()
-    # show([x], [y], label=["Gaussian Mixture"], title="TSP100", xdes="x", ydes="y", path="./tsp.pdf")
+    # show([x], [y], label=["Gaussian Mixture"], title="TSP300", xdes="x", ydes="y", path="./tsp.pdf")

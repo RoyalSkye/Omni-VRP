@@ -46,7 +46,7 @@ trainer_params = {
     # 'batch_size': 64,
     'logging': {
         'model_save_interval': 25000,
-        'img_save_interval': 10,
+        'img_save_interval': 100,
         'log_image_params_1': {
             'json_foldername': 'log_image_style',
             'filename': 'general.json'
@@ -66,19 +66,20 @@ trainer_params = {
 
 meta_params = {
     'enable': True,  # whether use meta-learning or not
-    'curriculum': False,  # adaptive sample task
+    'curriculum': True,  # adaptive sample task
     'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile']
-    'bootstrap_steps': 25,
-    'data_type': 'size',  # choose from ["size", "distribution", "size_distribution"]
+    'data_type': 'size_distribution',  # choose from ["size", "distribution", "size_distribution"]
     'epochs': 250000,  # the number of meta-model updates: (250*100000) / (1*5*64)
     'B': 1,  # the number of tasks in a mini-batch
     'k': 1,  # gradient decent steps in the inner-loop optimization of meta-learning method
+    'L': 0,  # bootstrap steps
     'meta_batch_size': 64,  # will be divided by 2 if problem_size >= 100
-    'update_weight': 1000,  # update weight of each task per X iters
-    'sch_epoch': 250000,  # for the task scheduler of size setting
+    'update_weight': 100,  # update weight of each task per X iters
+    'sch_epoch': 225000,  # for the task scheduler of size setting, where sch_epoch = 0.9 * epochs
     'solver': 'lkh3_offline',  # solver used to update the task weights, choose from ["bootstrap", "lkh3_online", "lkh3_offline", "best_model"]
     'alpha': 0.99,  # params for the outer-loop optimization of reptile
     'alpha_decay': 0.999,  # params for the outer-loop optimization of reptile
+    'beta': 0.9,  # loss weight
 }
 
 logger_params = {
@@ -140,7 +141,7 @@ def occumpy_mem(cuda_device):
     total, used = check_mem(cuda_device)
     total = int(total)
     used = int(used)
-    block_mem = int((total-used) * 0.85)
+    block_mem = int((total-used) * 0.5)
     x = torch.cuda.FloatTensor(256, 1024, block_mem)
     del x
 

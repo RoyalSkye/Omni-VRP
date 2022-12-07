@@ -32,13 +32,15 @@ class CVRPModel(nn.Module):
         # shape: (batch, problem+1, embedding)
         self.decoder.set_kv(self.encoded_nodes, weights=weights)
 
-    def forward(self, state, weights=None):
+    def forward(self, state, weights=None, selected=None, return_probs=False):
         batch_size = state.BATCH_IDX.size(0)
         pomo_size = state.BATCH_IDX.size(1)
 
         if state.selected_count == 0:  # First Move, depot
             selected = torch.zeros(size=(batch_size, pomo_size), dtype=torch.long)
             prob = torch.ones(size=(batch_size, pomo_size))
+            probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
+            # shape: (batch, pomo, problem_size+1)
 
             # # Use Averaged encoded nodes for decoder input_1
             # encoded_nodes_mean = self.encoded_nodes.mean(dim=1, keepdim=True)
@@ -53,27 +55,31 @@ class CVRPModel(nn.Module):
         elif state.selected_count == 1:  # Second Move, POMO
             selected = torch.arange(start=1, end=pomo_size+1)[None, :].expand(batch_size, pomo_size)
             prob = torch.ones(size=(batch_size, pomo_size))
+            probs = torch.ones(size=(batch_size, pomo_size, self.encoded_nodes.size(1)))
 
         else:
             encoded_last_node = _get_encoding(self.encoded_nodes, state.current_node)
             # shape: (batch, pomo, embedding)
             probs = self.decoder(encoded_last_node, state.load, ninf_mask=state.ninf_mask, weights=weights)
             # shape: (batch, pomo, problem+1)
-
-            while True:
-                if self.training or self.model_params['eval_type'] == 'softmax':
-                    selected = probs.reshape(batch_size * pomo_size, -1).multinomial(1).squeeze(dim=1).reshape(batch_size, pomo_size)
+            if selected is None:
+                while True:
+                    if self.training or self.model_params['eval_type'] == 'softmax':
+                        selected = probs.reshape(batch_size * pomo_size, -1).multinomial(1).squeeze(dim=1).reshape(batch_size, pomo_size)
+                        # shape: (batch, pomo)
+                    else:
+                        selected = probs.argmax(dim=2)
+                        # shape: (batch, pomo)
+                    prob = probs[state.BATCH_IDX, state.POMO_IDX, selected].reshape(batch_size, pomo_size)
                     # shape: (batch, pomo)
-                else:
-                    selected = probs.argmax(dim=2)
-                    # shape: (batch, pomo)
-
+                    if (prob != 0).all():
+                        break
+            else:
+                selected = selected
                 prob = probs[state.BATCH_IDX, state.POMO_IDX, selected].reshape(batch_size, pomo_size)
-                # shape: (batch, pomo)
 
-                if (prob != 0).all():
-                    break
-
+        if return_probs:
+            return selected, prob, probs
         return selected, prob
 
 

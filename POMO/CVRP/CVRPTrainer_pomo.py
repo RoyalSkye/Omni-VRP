@@ -51,11 +51,16 @@ class CVRPTrainer:
             torch.set_default_tensor_type('torch.FloatTensor')
 
         # Main Components
-        self.model_params["norm"] = "instance"  # Original "POMO" Paper uses instance/batch normalization
+        self.model_params["norm"] = "batch"  # Original "POMO" Paper uses batch normalization
         self.model = Model(**self.model_params)
         self.optimizer = Optimizer(self.model.parameters(), **self.optimizer_params['optimizer'])
         self.task_set = generate_task_set(self.meta_params)
-        self.task_w = torch.full((len(self.task_set),), 1 / len(self.task_set))
+        self.val_data, self.val_opt = {}, {}  # for lkh3_offline
+        assert not (self.meta_params['curriculum'] and self.meta_params["data_type"] in ["size", "distribution"]), "Not Implemented!"
+        if self.meta_params["data_type"] == "size_distribution":
+            # hardcoded - task_set: range(self.min_n, self.max_n, self.task_interval) * self.num_dist
+            self.min_n, self.max_n, self.task_interval, self.num_dist = 50, 200, 5, 11
+            self.task_w = torch.full(((self.max_n - self.min_n) // 5 + 1, self.num_dist), 1 / self.num_dist)
 
         # Restore
         self.start_epoch = 1
@@ -100,7 +105,8 @@ class CVRPTrainer:
                 dir = "../../data/CVRP/Distribution/"
                 paths = ["cvrp100_uniform.pkl", "cvrp100_gaussian.pkl", "cvrp100_cluster.pkl", "cvrp100_diagonal.pkl", "cvrp100_cvrplib.pkl"]
             elif self.meta_params["data_type"] == "size_distribution":
-                pass
+                dir = "../../data/CVRP/Size_Distribution/"
+                paths = ["cvrp200_uniform.pkl", "cvrp200_gaussian.pkl", "cvrp300_rotation.pkl"]
             if epoch <= 1 or (epoch % img_save_interval) == 0:
                 for val_path in paths:
                     no_aug_score = self._fast_val(self.model, path=os.path.join(dir, val_path), val_episodes=64)
@@ -145,20 +151,28 @@ class CVRPTrainer:
         loss_AM = AverageMeter()
         batch_size = self.meta_params['meta_batch_size']
 
-        # Adaptive task scheduler
-        start, end = 0, 0
-        pass
+        # Adaptive task scheduler - Not implemented for "size" and "distribution"
+        if self.meta_params['curriculum']:
+            if self.meta_params["data_type"] == "size_distribution":
+                start = self.min_n + int(min(epoch / self.meta_params['sch_epoch'], 1) * (self.max_n - self.min_n))  # linear
+                # start = self.min_n + int(1 / 2 * (1 - math.cos(math.pi * min(epoch / self.meta_params['sch_epoch'], 1))) * (self.max_n - self.min_n))  # cosine
+                n = start // 5 * 5
+                idx = (n - self.min_n) // 5
+                tasks, weights = self.task_set[idx * 11: (idx + 1) * 11], self.task_w[idx]
+                if epoch % self.meta_params['update_weight'] == 0:
+                    self.task_w[idx] = self._update_task_weight(tasks, weights, epoch)
 
         # sample a batch of tasks
         for b in range(self.meta_params['B']):
             for step in range(self.meta_params['k']):
                 if self.meta_params["data_type"] == "size":
-                    task_params = random.sample(range(start, end + 1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                    # batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 100 else self.meta_params['meta_batch_size'] // 2
+                    task_params = random.sample(self.task_set, 1)[0]
+                    batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 150 else self.meta_params['meta_batch_size'] // 2
                 elif self.meta_params["data_type"] == "distribution":
-                    task_params = self.task_set[torch.multinomial(self.task_w, 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
+                    task_params = random.sample(self.task_set, 1)[0]
                 elif self.meta_params["data_type"] == "size_distribution":
-                    pass
+                    task_params = tasks[torch.multinomial(self.task_w[idx], 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
+                    batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 150 else self.meta_params['meta_batch_size'] // 2
 
                 data = self._get_data(batch_size, task_params)
                 env_params = {'problem_size': data[-1].size(1), 'pomo_size': data[-1].size(1)}
@@ -272,3 +286,50 @@ class CVRPTrainer:
             data = (depot_xy, node_xy, node_demand)
 
         return data
+
+    def _update_task_weight(self, tasks, weights, epoch):
+        """
+        Update the weights of tasks.
+        For LKH3, set MAX_TRIALS = 100 to reduce time.
+        """
+        global run_func
+        start_t, gap = time.time(), torch.zeros(weights.size(0))
+        batch_size = 200 if self.meta_params["solver"] == "lkh3_offline" else 50
+        idx = torch.randperm(batch_size)[:50]
+        for i in range(gap.size(0)):
+            selected = tasks[i]
+            data = self._get_data(batch_size=batch_size, task_params=selected)
+
+            # only use lkh3 at the first iteration of updating task weights
+            if self.meta_params["solver"] == "lkh3_offline":
+                if selected not in self.val_data.keys():
+                    self.val_data[selected] = data
+                    opts = argparse.ArgumentParser()
+                    opts.cpus, opts.n, opts.progress_bar_mininterval = None, None, 0.1
+                    dataset = [(instance.cpu().numpy(),) for instance in data]
+                    executable = get_lkh_executable()
+                    def run_func(args):
+                        return solve_lkh_log(executable, *args, runs=1, disable_cache=True, MAX_TRIALS=100)  # otherwise it directly loads data from dir
+                    results, _ = run_all_in_pool(run_func, "./LKH3_result", dataset, opts, use_multiprocessing=False)
+                    self.val_opt[selected] = [j[0] for j in results]
+                data = self.val_data[selected][idx]
+
+            model_score = self._fast_val(self.meta_model, data=data, mode="eval", return_all=True)
+            model_score = model_score.tolist()
+
+            if self.meta_params["solver"] == "lkh3_offline":
+                lkh_score = [self.val_opt[selected][j] for j in idx.tolist()]
+                gap_list = [(model_score[j] - lkh_score[j]) / lkh_score[j] * 100 for j in range(len(lkh_score))]
+                gap[i] = sum(gap_list) / len(gap_list)
+            else:
+                raise NotImplementedError
+        print(">> Finish updating task weights within {}s".format(round(time.time() - start_t, 2)))
+
+        temp = 0.25
+        gap_temp = torch.Tensor([i / temp for i in gap.tolist()])
+        print(gap, temp)
+        print(">> Old task weights: {}".format(weights))
+        weights = torch.softmax(gap_temp, dim=0)
+        print(">> New task weights: {}".format(weights))
+
+        return weights

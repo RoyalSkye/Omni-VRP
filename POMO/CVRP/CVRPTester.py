@@ -7,7 +7,6 @@ from torch.optim import Adam as Optimizer
 from CVRPEnv import CVRPEnv as Env
 from CVRPModel import CVRPModel as Model
 
-from TSP_gurobi import solve_all_gurobi
 from utils.utils import *
 from utils.functions import load_dataset, save_dataset
 
@@ -106,8 +105,8 @@ class CVRPTester:
             score_AM.update(score, batch_size)
             aug_score_AM.update(aug_score, batch_size)
             episode += batch_size
-            gap = [max(all_score[i].item() - opt_sol[i], 0) / opt_sol[i] * 100 for i in range(batch_size)]
-            aug_gap = [max(all_aug_score[i].item() - opt_sol[i], 0) / opt_sol[i] * 100 for i in range(batch_size)]
+            gap = [(all_score[i].item() - opt_sol[i]) / opt_sol[i] * 100 for i in range(batch_size)]
+            aug_gap = [(all_aug_score[i].item() - opt_sol[i]) / opt_sol[i] * 100 for i in range(batch_size)]
             gap_AM.update(sum(gap) / batch_size, batch_size)
             aug_gap_AM.update(sum(aug_gap) / batch_size, batch_size)
 

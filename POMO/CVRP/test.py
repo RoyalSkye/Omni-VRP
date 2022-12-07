@@ -46,8 +46,8 @@ tester_params = {
     'test_robustness': False,
     'aug_factor': 8,
     'aug_batch_size': 100,
-    'test_set_path': '../../data/CVRP/Size/cvrp100_uniform.pkl',
-    'test_set_opt_sol_path': '../../data/CVRP/Size/opt_cvrp100_uniform.pkl'
+    'test_set_path': '../../data/CVRP/Size_Distribution/cvrp100_uniform.pkl',
+    'test_set_opt_sol_path': '../../data/CVRP/Size_Distribution/hgs/cvrp100_uniformoffset0n10000-hgs.pkl'
 }
 
 fine_tune_params = {

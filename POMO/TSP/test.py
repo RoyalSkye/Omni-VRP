@@ -28,7 +28,7 @@ model_params = {
     'logit_clipping': 10,
     'ff_hidden_dim': 512,
     'eval_type': 'argmax',
-    'norm': None  # TODO: which has a better performance?
+    'norm': "instance"
 }
 
 tester_params = {
@@ -37,7 +37,7 @@ tester_params = {
     'seed': 2023,
     'model_load': {
         'path': '../../pretrained/pomo_pretrained',  # directory path of pre-trained model and log files saved.
-        'epoch': 250000,  # epoch version of pre-trained model to load.
+        'epoch': 3100,  # epoch version of pre-trained model to load.
     },
     'test_episodes': 10000,
     'test_batch_size': 10000,
@@ -45,8 +45,8 @@ tester_params = {
     'test_robustness': False,
     'aug_factor': 8,
     'aug_batch_size': 100,
-    'test_set_path': '../../data/TSP/Size/tsp100_uniform.pkl',
-    'test_set_opt_sol_path': '../../data/TSP/Size/opt_tsp100_uniform.pkl'
+    'test_set_path': '../../data/TSP/Size_Distribution/tsp100_uniform.pkl',
+    'test_set_opt_sol_path': '../../data/TSP/Size_Distribution/concorde/tsp100_uniformoffset0n10000-concorde.pkl'
 }
 
 fine_tune_params = {

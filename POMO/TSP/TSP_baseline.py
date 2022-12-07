@@ -122,7 +122,7 @@ def get_lkh_executable(url="http://www.akira.ruc.dk/~keld/research/LKH-3/LKH-3.0
     return os.path.abspath(executable)
 
 
-def solve_lkh_log(executable, directory, name, loc, runs=1, disable_cache=False):
+def solve_lkh_log(executable, directory, name, loc, runs=1, disable_cache=False, MAX_TRIALS=10000):
 
     problem_filename = os.path.join(directory, "{}.lkh{}.vrp".format(name, runs))
     tour_filename = os.path.join(directory, "{}.lkh{}.tour".format(name, runs))
@@ -137,7 +137,7 @@ def solve_lkh_log(executable, directory, name, loc, runs=1, disable_cache=False)
         else:
             write_tsplib(problem_filename, loc, name=name)
 
-            params = {"PROBLEM_FILE": problem_filename, "OUTPUT_TOUR_FILE": tour_filename, "RUNS": runs, "SEED": 1234}
+            params = {"PROBLEM_FILE": problem_filename, "OUTPUT_TOUR_FILE": tour_filename, "RUNS": runs, "SEED": 1234, "MAX_TRIALS": MAX_TRIALS}
             write_lkh_par(param_filename, params)
 
             with open(log_filename, 'w') as f:
@@ -373,13 +373,13 @@ if __name__ == "__main__":
 
     parser = argparse.ArgumentParser()
     parser.add_argument("--method", type=str, default='concorde', choices=["nn", "gurobi", "gurobigap", "gurobit", "concorde", "lkh", "random_insertion", "nearest_insertion", "farthest_insertion"])
-    parser.add_argument("--datasets", nargs='+', default=["../../data/TSP/Size/tsp100_uniform.pkl", ], help="Filename of the dataset(s) to evaluate")
+    parser.add_argument("--datasets", nargs='+', default=["../../data/TSP/Size_Distribution/tsp100_uniform.pkl", ], help="Filename of the dataset(s) to evaluate")
     parser.add_argument("-f", action='store_false', help="Set true to overwrite")
     parser.add_argument("-o", default=None, help="Name of the results file to write")
     parser.add_argument("--cpus", type=int, help="Number of CPUs to use, defaults to all cores")
     parser.add_argument('--no_cuda', action='store_true', help='Disable CUDA (only for Tsiligirides)')
-    parser.add_argument('--disable_cache', action='store_false', help='Disable caching')
-    parser.add_argument('--max_calc_batch_size', type=int, default=10000, help='Size for subbatches')
+    parser.add_argument('--disable_cache', action='store_true', help='Disable caching')
+    parser.add_argument('--max_calc_batch_size', type=int, default=1000, help='Size for subbatches')
     parser.add_argument('--progress_bar_mininterval', type=float, default=0.1, help='Minimum interval')
     parser.add_argument('-n', type=int, default=10000, help="Number of instances to process")
     parser.add_argument('--offset', type=int, default=0, help="Offset where to start processing")
