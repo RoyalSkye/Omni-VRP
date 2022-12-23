@@ -259,7 +259,7 @@ if __name__ == "__main__":
     parser.add_argument("--cpus", type=int, help="Number of CPUs to use, defaults to all cores")
     parser.add_argument('--disable_cache', action='store_true', help='Disable caching')
     parser.add_argument('--progress_bar_mininterval', type=float, default=0.1, help='Minimum interval')
-    parser.add_argument('-n', type=int, default=10000, help="Number of instances to process")
+    parser.add_argument('-n', type=int, default=1000, help="Number of instances to process")
     parser.add_argument('--offset', type=int, default=0, help="Offset where to start processing")
     parser.add_argument('--results_dir', default='baseline_results', help="Name of results directory")
 

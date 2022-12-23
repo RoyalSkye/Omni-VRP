@@ -21,8 +21,7 @@ class TSPTrainer:
     """
     Implementation of POMO with MAML / FOMAML / Reptile on TSP.
     For MAML & FOMAML, ref to "Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks";
-    For Reptile, ref to "On First-Order Meta-Learning Algorithms".
-    Refer to "https://lilianweng.github.io/posts/2018-11-30-meta-learning"
+    For Reptile, ref to "On First-Order Meta-Learning Algorithms" and "On the generalization of neural combinatorial optimization heuristics".
     """
     def __init__(self,
                  env_params,
@@ -70,7 +69,7 @@ class TSPTrainer:
         elif self.meta_params["data_type"] == "size_distribution":
             # hardcoded - task_set: range(self.min_n, self.max_n, self.task_interval) * self.num_dist
             self.min_n, self.max_n, self.task_interval, self.num_dist = 50, 200, 5, 11
-            self.task_w = torch.full(((self.max_n - self.min_n) // 5 + 1, self.num_dist), 1 / self.num_dist)
+            self.task_w = torch.full(((self.max_n - self.min_n) // self.task_interval + 1, self.num_dist), 1 / self.num_dist)
 
         # Restore
         self.start_epoch = 1
@@ -94,8 +93,8 @@ class TSPTrainer:
         for epoch in range(self.start_epoch, self.meta_params['epochs']+1):
             self.logger.info('=================================================================')
 
-            # lr decay (by 10) to speed up convergence at 90th and 95th iterations
-            if epoch in [int(self.meta_params['epochs'] * 0.9), int(self.meta_params['epochs'] * 0.95)]:
+            # lr decay (by 10) to speed up convergence at 90th iteration
+            if epoch in [int(self.meta_params['epochs'] * 0.9)]:
                 self.optimizer_params['optimizer']['lr'] /= 10
                 for group in self.meta_optimizer.param_groups:
                     group["lr"] /= 10
@@ -117,7 +116,7 @@ class TSPTrainer:
                 paths = ["tsp100_uniform.pkl", "tsp100_gaussian.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl", "tsp100_tsplib.pkl"]
             elif self.meta_params["data_type"] == "size_distribution":
                 dir = "../../data/TSP/Size_Distribution/"
-                paths = ["tsp200_uniform.pkl", "tsp200_gaussian.pkl", "tsp300_rotation.pkl"]
+                paths = ["tsp200_uniform.pkl", "tsp300_rotation.pkl"]
             if epoch <= 1 or (epoch % img_save_interval) == 0:
                 for val_path in paths:
                     no_aug_score = self._fast_val(self.meta_model, path=os.path.join(dir, val_path), val_episodes=64, mode="eval")
@@ -186,9 +185,8 @@ class TSPTrainer:
             for size_distribution: combine together.
         """
         self.meta_optimizer.zero_grad()
-        score_AM = AverageMeter()
-        loss_AM = AverageMeter()
-        batch_size = self.meta_params['meta_batch_size']
+        score_AM, loss_AM = AverageMeter(), AverageMeter()
+        meta_batch_size = self.meta_params['meta_batch_size']
 
         # Adaptive task scheduler:
         if self.meta_params['curriculum']:
@@ -203,8 +201,8 @@ class TSPTrainer:
             elif self.meta_params["data_type"] == "size_distribution":
                 start = self.min_n + int(min(epoch / self.meta_params['sch_epoch'], 1) * (self.max_n - self.min_n))  # linear
                 # start = self.min_n + int(1 / 2 * (1 - math.cos(math.pi * min(epoch / self.meta_params['sch_epoch'], 1))) * (self.max_n - self.min_n))  # cosine
-                n = start // 5 * 5
-                idx = (n - self.min_n) // 5
+                n = start // self.task_interval * self.task_interval
+                idx = (n - self.min_n) // self.task_interval
                 tasks, weights = self.task_set[idx*11: (idx+1)*11], self.task_w[idx]
                 if epoch % self.meta_params['update_weight'] == 0:
                     self.task_w[idx] = self._update_task_weight(tasks, weights, epoch)
@@ -216,18 +214,14 @@ class TSPTrainer:
             # sample a task
             if self.meta_params["data_type"] == "size":
                 task_params = random.sample(range(start, end+1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 150 else self.meta_params['meta_batch_size'] // 2
+                batch_size = meta_batch_size if (task_params[0] <= 150 and self.meta_params['k'] + self.meta_params['L'] == 1) else meta_batch_size // 2
             elif self.meta_params["data_type"] == "distribution":
-                # sample based on task weights
                 task_params = self.task_set[torch.multinomial(self.task_w, 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                # task_params = self.task_set[random.sample(torch.topk(self.task_w, 10)[1].tolist(), 1)[0]] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                # curri: from easy task (small gaps) -> hard task (large gaps)
-                # selected_idx = torch.sort(self.task_w, descending=False)[1].tolist()[start: end]
-                # task_params = self.task_set[random.sample(selected_idx, 1)[0]] if self.meta_params['curriculum'] and epoch >= self.meta_params['update_weight'] else random.sample(self.task_set, 1)[0]
+                batch_size = meta_batch_size if self.meta_params['k'] + self.meta_params['L'] == 1 else meta_batch_size // 2
             elif self.meta_params["data_type"] == "size_distribution":
                 task_params = tasks[torch.multinomial(self.task_w[idx], 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 150 else self.meta_params['meta_batch_size'] // 2
-            data = self._get_data(batch_size, task_params)
+                batch_size = meta_batch_size if (task_params[0] <= 150 and self.meta_params['k'] + self.meta_params['L'] == 1) else meta_batch_size // 2
+            train_data = self._get_data(meta_batch_size, task_params)
 
             # preparation
             if self.meta_params['meta_method'] in ['fomaml', 'reptile']:
@@ -244,7 +238,8 @@ class TSPTrainer:
 
             # inner-loop optimization
             for step in range(self.meta_params['k']):
-                # data = self._get_data(batch_size, task_params)
+                idx = torch.randperm(meta_batch_size)[:batch_size]
+                data = train_data[idx] if self.meta_params['meta_method'] != "reptile" else self._get_data(meta_batch_size, task_params)
                 env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
                 self.meta_model.train()
                 if self.meta_params['meta_method'] in ['reptile', 'fomaml']:
@@ -266,7 +261,8 @@ class TSPTrainer:
                     bootstrap_optimizer = Optimizer(bootstrap_model.parameters(), **self.optimizer_params['optimizer'])
                     bootstrap_optimizer.load_state_dict(optimizer.state_dict())
             for step in range(self.meta_params['L']):
-                # data = self._get_data(batch_size, task_params)
+                idx = torch.randperm(meta_batch_size)[:batch_size]
+                data = train_data[idx] if self.meta_params['meta_method'] != "reptile" else self._get_data(meta_batch_size, task_params)
                 if self.meta_params['meta_method'] == 'maml':
                     avg_score, avg_loss, bootstrap_model = self._train_one_batch_maml(bootstrap_model, data, Env(**env_params), create_graph=False)
                 else:
@@ -400,7 +396,7 @@ class TSPTrainer:
         lr, weight_decay = self.optimizer_params['optimizer']['lr'], self.optimizer_params['optimizer']['weight_decay']
         for i, ((name, param), grad) in enumerate(zip(fast_weight.items(), gradients)):
             if self.meta_optimizer.state_dict()['state'] != {}:
-                i = i if self.model_params['meta_update_encoder'] else i + 58  # i \in [0, 62], where encoder \in [0, 57] + decoder \in [58, 62]
+                i = i if self.model_params['meta_update_encoder'] else i + 80  # (with norm layer): i \in [0, 85], where encoder \in [0, 79] + decoder \in [80, 85]
                 state = self.meta_optimizer.state_dict()['state'][i]
                 step, exp_avg, exp_avg_sq = state['step'], state['exp_avg'], state['exp_avg_sq']
                 step += 1
@@ -654,8 +650,6 @@ class TSPTrainer:
                 raise NotImplementedError
         print(">> Finish updating task weights within {}s".format(round(time.time()-start_t, 2)))
 
-        # temp = max(1.0 * (1 - epoch / self.meta_params["sch_epoch"]), 0.05)
-        # temp = max(1.0 - 1/2 * (1 - math.cos(math.pi * min(epoch / self.meta_params['sch_epoch'], 1))), 0.2)
         temp = 1.0
         gap_temp = torch.Tensor([i/temp for i in gap.tolist()])
         print(gap, temp)

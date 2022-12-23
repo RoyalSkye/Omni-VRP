@@ -178,6 +178,10 @@ class CVRPTester:
         score_list, aug_score_list, gap_list, aug_gap_list = [], [], [], []
 
         for k in range(self.fine_tune_params['k']):
+            if k in [int(self.fine_tune_params['k'] * 0.4)] and self.fine_tune_params['lr_decay']:
+                for group in self.optimizer.param_groups:
+                    group["lr"] /= 10
+                    print(">> LR decay to {}".format(group["lr"]))
             # score, aug_score, gap, aug_gap = self._test(store_res=False)
             # score_list.append(score); aug_score_list.append(aug_score)
             # gap_list.append(gap); aug_gap_list.append(aug_gap)

@@ -20,8 +20,7 @@ class CVRPTrainer:
     """
     Implementation of POMO with MAML / FOMAML / Reptile on CVRP.
     For MAML & FOMAML, ref to "Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks";
-    For Reptile, ref to "On First-Order Meta-Learning Algorithms".
-    Refer to "https://lilianweng.github.io/posts/2018-11-30-meta-learning"
+    For Reptile, ref to "On First-Order Meta-Learning Algorithms" and "On the generalization of neural combinatorial optimization heuristics".
     """
     def __init__(self,
                  env_params,
@@ -54,7 +53,7 @@ class CVRPTrainer:
             torch.set_default_tensor_type('torch.FloatTensor')
 
         # Main Components
-        self.model_params["norm"] = None
+        self.model_params["norm"] = 'instance'
         self.meta_model = Model(**self.model_params)
         self.meta_optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.alpha = self.meta_params['alpha']  # for reptile
@@ -89,7 +88,7 @@ class CVRPTrainer:
             self.logger.info('=================================================================')
 
             # lr decay (by 10) to speed up convergence at 90th and 95th iterations
-            if epoch in [int(self.meta_params['epochs'] * 0.9), int(self.meta_params['epochs'] * 0.95)]:
+            if epoch in [int(self.meta_params['epochs'] * 0.9)]:
                 self.optimizer_params['optimizer']['lr'] /= 10
                 for group in self.meta_optimizer.param_groups:
                     group["lr"] /= 10
@@ -111,7 +110,7 @@ class CVRPTrainer:
                 paths = ["cvrp100_uniform.pkl", "cvrp100_gaussian.pkl", "cvrp100_cluster.pkl", "cvrp100_diagonal.pkl", "cvrp100_cvrplib.pkl"]
             elif self.meta_params["data_type"] == "size_distribution":
                 dir = "../../data/CVRP/Size_Distribution/"
-                paths = ["cvrp200_uniform.pkl", "cvrp200_gaussian.pkl", "cvrp300_rotation.pkl"]
+                paths = ["cvrp200_uniform.pkl", "cvrp300_rotation.pkl"]
             if epoch <= 1 or (epoch % img_save_interval) == 0:
                 for val_path in paths:
                     no_aug_score = self._fast_val(self.meta_model, path=os.path.join(dir, val_path), val_episodes=64, mode="eval")
@@ -174,9 +173,8 @@ class CVRPTrainer:
             for size_distribution: combine together.
         """
         self.meta_optimizer.zero_grad()
-        score_AM = AverageMeter()
-        loss_AM = AverageMeter()
-        batch_size = self.meta_params['meta_batch_size']
+        score_AM, loss_AM = AverageMeter(), AverageMeter()
+        meta_batch_size = self.meta_params['meta_batch_size']
 
         # Adaptive task scheduler - Not implemented for "size" and "distribution"
         if self.meta_params['curriculum']:
@@ -196,13 +194,14 @@ class CVRPTrainer:
             # sample a task
             if self.meta_params["data_type"] == "size":
                 task_params = random.sample(self.task_set, 1)[0]
-                batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 150 else self.meta_params['meta_batch_size'] // 2
+                batch_size = meta_batch_size if (task_params[0] <= 150 and self.meta_params['k'] + self.meta_params['L'] == 1) else meta_batch_size // 2
             elif self.meta_params["data_type"] == "distribution":
                 task_params = random.sample(self.task_set, 1)[0]
+                batch_size = meta_batch_size if self.meta_params['k'] + self.meta_params['L'] == 1 else meta_batch_size // 2
             elif self.meta_params["data_type"] == "size_distribution":
                 task_params = tasks[torch.multinomial(self.task_w[idx], 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 150 else self.meta_params['meta_batch_size'] // 2
-            data = self._get_data(batch_size, task_params)
+                batch_size = meta_batch_size if (task_params[0] <= 150 and self.meta_params['k'] + self.meta_params['L'] == 1) else meta_batch_size // 2
+            train_data = self._get_data(meta_batch_size, task_params)
 
             # preparation
             if self.meta_params['meta_method'] in ['fomaml', 'reptile']:
@@ -219,7 +218,8 @@ class CVRPTrainer:
 
             # inner-loop optimization
             for step in range(self.meta_params['k']):
-                # data = self._get_data(batch_size, task_params)
+                idx = torch.randperm(meta_batch_size)[:batch_size]
+                data = (train_data[0][idx], train_data[1][idx], train_data[2][idx]) if self.meta_params['meta_method'] != "reptile" else self._get_data(meta_batch_size, task_params)
                 env_params = {'problem_size': data[-1].size(1), 'pomo_size': data[-1].size(1)}
                 self.meta_model.train()
                 if self.meta_params['meta_method'] in ['reptile', 'fomaml']:
@@ -241,7 +241,8 @@ class CVRPTrainer:
                     bootstrap_optimizer = Optimizer(bootstrap_model.parameters(), **self.optimizer_params['optimizer'])
                     bootstrap_optimizer.load_state_dict(optimizer.state_dict())
             for step in range(self.meta_params['L']):
-                # data = self._get_data(batch_size, task_params)
+                idx = torch.randperm(meta_batch_size)[:batch_size]
+                data = (train_data[0][idx], train_data[1][idx], train_data[2][idx]) if self.meta_params['meta_method'] != "reptile" else self._get_data(meta_batch_size, task_params)
                 if self.meta_params['meta_method'] == 'maml':
                     avg_score, avg_loss, bootstrap_model = self._train_one_batch_maml(bootstrap_model, data, Env(**env_params), create_graph=False)
                 else:
@@ -367,7 +368,7 @@ class CVRPTrainer:
         lr, weight_decay = self.optimizer_params['optimizer']['lr'], self.optimizer_params['optimizer']['weight_decay']
         for i, ((name, param), grad) in enumerate(zip(fast_weight.items(), gradients)):
             if self.meta_optimizer.state_dict()['state'] != {}:
-                i = i if self.model_params['meta_update_encoder'] else i + 58  # i \in [0, 62], where encoder \in [0, 57] + decoder \in [58, 62]
+                i = i if self.model_params['meta_update_encoder'] else i + 82  # (with norm layer): i \in [0, 86], where encoder \in [0, 81] + decoder \in [82, 86]
                 state = self.meta_optimizer.state_dict()['state'][i]
                 step, exp_avg, exp_avg_sq = state['step'], state['exp_avg'], state['exp_avg_sq']
                 step += 1
@@ -483,7 +484,7 @@ class CVRPTrainer:
         else:
             return loss_mean, kl_loss
 
-    def _get_data(self, batch_size, task_params):
+    def _get_data(self, batch_size, task_params, return_capacity=False):
         """
         Return CVRP data with the form of:
         depot_xy: [batch_size, 1, 2]
@@ -504,7 +505,7 @@ class CVRPTrainer:
             raise NotImplementedError
 
         # normalized node_demand by capacity & only return (depot_xy, node_xy, node_demand)
-        if len(data) == 4:
+        if len(data) == 4 and not return_capacity:
             depot_xy, node_xy, node_demand, capacity = data
             node_demand = node_demand / capacity.view(-1, 1)
             data = (depot_xy, node_xy, node_demand)
@@ -543,21 +544,23 @@ class CVRPTrainer:
         idx = torch.randperm(batch_size)[:50]
         for i in range(gap.size(0)):
             selected = tasks[i]
-            data = self._get_data(batch_size=batch_size, task_params=selected)
+            data = self._get_data(batch_size=batch_size, task_params=selected, return_capacity=True)
 
             # only use lkh3 at the first iteration of updating task weights
             if self.meta_params["solver"] == "lkh3_offline":
                 if selected not in self.val_data.keys():
-                    self.val_data[selected] = data
+                    self.val_data[selected] = data  # (depot, loc, demand, capacity)
                     opts = argparse.ArgumentParser()
                     opts.cpus, opts.n, opts.progress_bar_mininterval = None, None, 0.1
-                    dataset = [(instance.cpu().numpy(),) for instance in data]
+                    dataset = [attr.cpu().tolist() for attr in data]
+                    dataset = [(dataset[0][i][0], dataset[1][i], [int(d) for d in dataset[2][i]], int(dataset[3][i])) for i in range(data[0].size(0))]
                     executable = get_lkh_executable()
                     def run_func(args):
                         return solve_lkh_log(executable, *args, runs=1, disable_cache=True, MAX_TRIALS=100)  # otherwise it directly loads data from dir
                     results, _ = run_all_in_pool(run_func, "./LKH3_result", dataset, opts, use_multiprocessing=False)
                     self.val_opt[selected] = [j[0] for j in results]
-                data = self.val_data[selected][idx]
+                data = [attr[idx] for attr in self.val_data[selected]]
+                data = (data[0], data[1], data[2] / data[3].view(-1, 1))
 
             model_score = self._fast_val(self.meta_model, data=data, mode="eval", return_all=True)
             model_score = model_score.tolist()

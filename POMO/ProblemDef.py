@@ -55,7 +55,7 @@ def get_random_problems(batch_size, problem_size, num_modes=0, cdist=0, distribu
     # save as List
     if path is not None:
         if problem == "tsp":
-            with open(os.path.join(path, "tsp{}_{}.pkl".format(problem_size, distribution)), "wb") as f:
+            with open(os.path.join(path, "tsp{}_{}_{}_{}.pkl".format(problem_size, distribution, num_modes, cdist)), "wb") as f:
                 pickle.dump(problems.tolist(), f, pickle.HIGHEST_PROTOCOL)
         else:
             with open(os.path.join(path, "cvrp{}_{}.pkl".format(problem_size, distribution)), "wb") as f:
@@ -249,16 +249,18 @@ if __name__ == "__main__":
     val seed: 2022
     test seed: 2023
     """
-    path = "../data/CVRP/Size_Distribution"
+    path = "../data/TSP/Size_Distribution"
     if not os.path.exists(path):
         os.makedirs(path)
     seed_everything(seed=2023)
 
     # test data for Table 1
-    # for s in [100, 150, 200]:
-    #     for dist in ["uniform", "gaussian"]:
+    # for s in [200, 300]:
+    #     for dist in ["uniform"]:
     #         print(">> Generating TSP instances following {} distribution!".format(dist))
-    #         get_random_problems(15000, s, distribution=dist, path=path, problem="cvrp")
+    #         get_random_problems(2000, s, distribution=dist, path=path, problem="tsp")
+    for m, c in [(3, 5), (6, 20), (9, 50)]:
+        get_random_problems(2000, 200, num_modes=m, cdist=c, distribution="gaussian_mixture", path=path, problem="tsp")
 
     # var-size test data
     # for s in [50, 100, 150, 200, 300, 500, 1000]:
@@ -266,8 +268,8 @@ if __name__ == "__main__":
     #     get_random_problems(15000, s, distribution="uniform", path=path, problem="tsp")
 
     # data = generate_gaussian_mixture_tsp(dataset_size=1, graph_size=150, num_modes=3, cdist=10)
-    data = load_dataset("../data/CVRP/Size_Distribution/cvrp100_uniform.pkl")
-    print(data[0])
+    # data = load_dataset("../data/CVRP/Size_Distribution/cvrp100_uniform.pkl")
+    # print(data[0])
     # print(type(data), data.size(), data)
     # x, y = [i[0] for i in data[1]], [i[-1] for i in data[1]]
     # x, y = data[0, :, 0].tolist(), data[0, :, -1].tolist()

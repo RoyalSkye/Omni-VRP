@@ -84,8 +84,8 @@ class TSPTrainer:
         for epoch in range(self.start_epoch, self.meta_params['epochs']+1):
             self.logger.info('=================================================================')
 
-            # lr decay (by 10) to speed up convergence at 90th and 95th iterations
-            if epoch in [int(self.meta_params['epochs'] * 0.9), int(self.meta_params['epochs'] * 0.95)]:
+            # lr decay (by 10) to speed up convergence at 90th iteration
+            if epoch in [int(self.meta_params['epochs'] * 0.9)]:
                 self.optimizer_params['optimizer']['lr'] /= 10
                 for group in self.optimizer.param_groups:
                     group["lr"] /= 10
@@ -107,7 +107,7 @@ class TSPTrainer:
                 paths = ["tsp100_uniform.pkl", "tsp100_gaussian.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl", "tsp100_tsplib.pkl"]
             elif self.meta_params["data_type"] == "size_distribution":
                 dir = "../../data/TSP/Size_Distribution/"
-                paths = ["tsp200_uniform.pkl", "tsp200_gaussian.pkl", "tsp300_rotation.pkl"]
+                paths = ["tsp200_uniform.pkl", "tsp300_rotation.pkl"]
             if epoch <= 1 or (epoch % img_save_interval) == 0:
                 for val_path in paths:
                     no_aug_score = self._fast_val(self.model, path=os.path.join(dir, val_path), val_episodes=64)
@@ -359,7 +359,7 @@ class TSPTrainer:
                 raise NotImplementedError
         print(">> Finish updating task weights within {}s".format(round(time.time()-start_t, 2)))
 
-        temp = 0.25
+        temp = 1.0
         gap_temp = torch.Tensor([i/temp for i in gap.tolist()])
         print(gap, temp)
         print(">> Old task weights: {}".format(weights))

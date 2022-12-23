@@ -56,7 +56,7 @@ class TSPTester:
         checkpoint_fullname = '{path}/checkpoint-{epoch}.pt'.format(**model_load)
         checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
         self.model.load_state_dict(checkpoint['model_state_dict'])
-        # self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])  # TODO: which performance is good? load or not load?
+        # self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.logger.info(">> Model loaded from {}".format(checkpoint_fullname))
 
         # utility
@@ -185,6 +185,10 @@ class TSPTester:
         score_list, aug_score_list, gap_list, aug_gap_list = [], [], [], []
 
         for k in range(self.fine_tune_params['k']):
+            if k in [int(self.fine_tune_params['k'] * 0.4)] and self.fine_tune_params['lr_decay']:
+                for group in self.optimizer.param_groups:
+                    group["lr"] /= 10
+                    print(">> LR decay to {}".format(group["lr"]))
             # score, aug_score, gap, aug_gap = self._test(store_res=False)
             # score_list.append(score); aug_score_list.append(aug_score)
             # gap_list.append(gap); aug_gap_list.append(aug_gap)

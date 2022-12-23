@@ -36,11 +36,11 @@ tester_params = {
     'cuda_device_num': CUDA_DEVICE_NUM,
     'seed': 2023,
     'model_load': {
-        'path': '../../pretrained/pomo_pretrained',  # directory path of pre-trained model and log files saved.
-        'epoch': 3100,  # epoch version of pre-trained model to load.
+        'path': '../../pretrained/pomo_maml',  # directory path of pre-trained model and log files saved.
+        'epoch': 250000,  # epoch version of pre-trained model to load.
     },
-    'test_episodes': 10000,
-    'test_batch_size': 10000,
+    'test_episodes': 1000,
+    'test_batch_size': 1000,
     'augmentation_enable': True,
     'test_robustness': False,
     'aug_factor': 8,
@@ -51,12 +51,13 @@ tester_params = {
 
 fine_tune_params = {
     'enable': False,  # evaluate few-shot generalization
-    'fine_tune_episodes': 500,  # how many data used to fine-tune the pretrained model
-    'k': 20,  # fine-tune steps/epochs
-    'fine_tune_batch_size': 64,  # the batch size of the inner-loop optimization
-    'augmentation_enable': False,
+    'fine_tune_episodes': 1000,  # how many data used to fine-tune the pretrained model
+    'k': 50,  # fine-tune steps/epochs
+    'fine_tune_batch_size': 32,  # the batch size of the inner-loop optimization
+    'augmentation_enable': True,
+    'lr_decay': True,
     'optimizer': {
-        'lr': 1e-4 * 0.1,
+        'lr': 1e-4,
         'weight_decay': 1e-6
     }
 }
