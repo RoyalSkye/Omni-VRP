@@ -149,12 +149,16 @@ class EncoderLayer(nn.Module):
             multi_head_out = F.linear(out_concat, weights['encoder.layers.{}.multi_head_combine.weight'.format(index)], weights['encoder.layers.{}.multi_head_combine.bias'.format(index)])
             if self.model_params['norm'] is None:
                 out1 = self.addAndNormalization1(input1, multi_head_out)
+            elif self.model_params["norm"] == "rezero":
+                out1 = self.addAndNormalization1(input1, multi_head_out, weights={'weight': weights['encoder.layers.{}.addAndNormalization1.norm'.format(index)]})
             else:
                 out1 = self.addAndNormalization1(input1, multi_head_out, weights={'weight': weights['encoder.layers.{}.addAndNormalization1.norm.weight'.format(index)], 'bias': weights['encoder.layers.{}.addAndNormalization1.norm.bias'.format(index)]})
             out2 = self.feedForward(out1, weights={'weight1': weights['encoder.layers.{}.feedForward.W1.weight'.format(index)], 'bias1': weights['encoder.layers.{}.feedForward.W1.bias'.format(index)],
                                                    'weight2': weights['encoder.layers.{}.feedForward.W2.weight'.format(index)], 'bias2': weights['encoder.layers.{}.feedForward.W2.bias'.format(index)]})
             if self.model_params['norm'] is None:
                 out3 = self.addAndNormalization2(out1, out2)
+            elif self.model_params["norm"] == "rezero":
+                out3 = self.addAndNormalization2(out1, out2, weights={'weight': weights['encoder.layers.{}.addAndNormalization2.norm'.format(index)]})
             else:
                 out3 = self.addAndNormalization2(out1, out2, weights={'weight': weights['encoder.layers.{}.addAndNormalization2.norm.weight'.format(index)], 'bias': weights['encoder.layers.{}.addAndNormalization2.norm.bias'.format(index)]})
 
@@ -317,16 +321,20 @@ class Add_And_Normalization_Module(nn.Module):
         embedding_dim = model_params['embedding_dim']
         if model_params["norm"] == "batch":
             self.norm = nn.BatchNorm1d(embedding_dim, affine=True, track_running_stats=True)
+        elif model_params["norm"] == "batch_no_track":
+            self.norm = nn.BatchNorm1d(embedding_dim, affine=True, track_running_stats=False)
         elif model_params["norm"] == "instance":
             self.norm = nn.InstanceNorm1d(embedding_dim, affine=True, track_running_stats=False)
+        elif model_params["norm"] == "rezero":
+            self.norm = torch.nn.Parameter(torch.Tensor([0.]), requires_grad=True)
         else:
             self.norm = None
 
     def forward(self, input1, input2, weights=None):
         # input.shape: (batch, problem, embedding)
         if weights is None:
-            added = input1 + input2
             if isinstance(self.norm, nn.InstanceNorm1d):
+                added = input1 + input2
                 transposed = added.transpose(1, 2)
                 # shape: (batch, embedding, problem)
                 normalized = self.norm(transposed)
@@ -334,23 +342,29 @@ class Add_And_Normalization_Module(nn.Module):
                 back_trans = normalized.transpose(1, 2)
                 # shape: (batch, problem, embedding)
             elif isinstance(self.norm, nn.BatchNorm1d):
+                added = input1 + input2
                 batch, problem, embedding = added.size()
                 normalized = self.norm(added.reshape(batch * problem, embedding))
                 back_trans = normalized.reshape(batch, problem, embedding)
+            elif isinstance(self.norm, nn.Parameter):
+                back_trans = input1 + self.norm * input2
             else:
-                back_trans = added
+                back_trans = input1 + input2
         else:
-            added = input1 + input2
             if isinstance(self.norm, nn.InstanceNorm1d):
+                added = input1 + input2
                 transposed = added.transpose(1, 2)
                 normalized = F.instance_norm(transposed, weight=weights['weight'], bias=weights['bias'])
                 back_trans = normalized.transpose(1, 2)
             elif isinstance(self.norm, nn.BatchNorm1d):
+                added = input1 + input2
                 batch, problem, embedding = added.size()
                 normalized = F.batch_norm(added.reshape(batch * problem, embedding), running_mean=self.norm.running_mean, running_var=self.norm.running_var, weight=weights['weight'], bias=weights['bias'], training=True)
                 back_trans = normalized.reshape(batch, problem, embedding)
+            elif isinstance(self.norm, nn.Parameter):
+                back_trans = input1 + weights['weight'] * input2
             else:
-                back_trans = added
+                back_trans = input1 + input2
 
         return back_trans
 

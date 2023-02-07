@@ -75,7 +75,7 @@ class GROUP_STATE:
 
 class GROUP_ENVIRONMENT:
 
-    def __init__(self, data, problem_size, round_distances):
+    def __init__(self, data, problem_size, round_distances, loc_scaler=1.0):
         # seq.shape = (batch, TSP_SIZE, 2)
 
         self.data = data
@@ -84,6 +84,7 @@ class GROUP_ENVIRONMENT:
         self.group_state = None
         self.problem_size = problem_size
         self.round_distances = round_distances
+        self.loc_scaler = loc_scaler
 
     def reset(self, group_size):
         self.group_s = group_size
@@ -117,6 +118,9 @@ class GROUP_ENVIRONMENT:
         rolled_seq = ordered_seq.roll(dims=2, shifts=-1)
         segment_lengths = ((ordered_seq - rolled_seq) ** 2).sum(3).sqrt()
         # size = (batch, group, TSP_SIZE)
+
+        if self.round_distances:
+            segment_lengths = torch.round(segment_lengths * self.loc_scaler) / self.loc_scaler
 
         group_travel_distances = segment_lengths.sum(2)
         # size = (batch, group)

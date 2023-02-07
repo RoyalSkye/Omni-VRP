@@ -53,7 +53,10 @@ class CVRPTrainer:
             torch.set_default_tensor_type('torch.FloatTensor')
 
         # Main Components
-        self.model_params["norm"] = 'instance'
+        # (`no` norm) and (`batch` with fomaml) will destabilize the meta-training, while (batch with maml) is ok;
+        # On the zero-shot setting, `instance` norm and `batch_no_track` are better than `batch` norm;
+        # On the few-shot setting, `batch` norm seems to better than `instance` norm, with a faster adaptation to OOD data.
+        self.model_params["norm"] = 'batch_no_track'
         self.meta_model = Model(**self.model_params)
         self.meta_optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.alpha = self.meta_params['alpha']  # for reptile
@@ -190,24 +193,30 @@ class CVRPTrainer:
         self._alpha_scheduler(epoch)  # for reptile
         fast_weights, val_loss, meta_grad_dict = [], 0, {(i, j): 0 for i, group in enumerate(self.meta_optimizer.param_groups) for j, _ in enumerate(group['params'])}
 
+        # sample a batch of tasks
+        w, selected_tasks = [1.0] * self.meta_params['B'], []
         for b in range(self.meta_params['B']):
-            # sample a task
             if self.meta_params["data_type"] == "size":
                 task_params = random.sample(self.task_set, 1)[0]
-                batch_size = meta_batch_size if (task_params[0] <= 150 and self.meta_params['k'] + self.meta_params['L'] == 1) else meta_batch_size // 2
+                batch_size = meta_batch_size if task_params[0] <= 150 else meta_batch_size // 2
             elif self.meta_params["data_type"] == "distribution":
                 task_params = random.sample(self.task_set, 1)[0]
-                batch_size = meta_batch_size if self.meta_params['k'] + self.meta_params['L'] == 1 else meta_batch_size // 2
+                batch_size = meta_batch_size
             elif self.meta_params["data_type"] == "size_distribution":
-                task_params = tasks[torch.multinomial(self.task_w[idx], 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                batch_size = meta_batch_size if (task_params[0] <= 150 and self.meta_params['k'] + self.meta_params['L'] == 1) else meta_batch_size // 2
-            train_data = self._get_data(meta_batch_size, task_params)
+                selected = torch.multinomial(self.task_w[idx], 1).item()
+                task_params = tasks[selected] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
+                batch_size = meta_batch_size if task_params[0] <= 150 else meta_batch_size // 2
+                w[b] = self.task_w[idx][selected].item()
+            selected_tasks.append(task_params)
+        w = torch.softmax(torch.Tensor(w), dim=0)
 
+        for b in range(self.meta_params['B']):
+            task_params, task_w = selected_tasks[b], w[b].item()
             # preparation
             if self.meta_params['meta_method'] in ['fomaml', 'reptile']:
                 task_model = copy.deepcopy(self.meta_model)
                 optimizer = Optimizer(task_model.parameters(), **self.optimizer_params['optimizer'])
-                optimizer.load_state_dict(self.meta_optimizer.state_dict())
+                # optimizer.load_state_dict(self.meta_optimizer.state_dict())
             elif self.meta_params['meta_method'] == 'maml':
                 if self.model_params['meta_update_encoder']:
                     fast_weight = OrderedDict(self.meta_model.named_parameters())
@@ -218,8 +227,7 @@ class CVRPTrainer:
 
             # inner-loop optimization
             for step in range(self.meta_params['k']):
-                idx = torch.randperm(meta_batch_size)[:batch_size]
-                data = (train_data[0][idx], train_data[1][idx], train_data[2][idx]) if self.meta_params['meta_method'] != "reptile" else self._get_data(meta_batch_size, task_params)
+                data = self._get_data(batch_size, task_params)
                 env_params = {'problem_size': data[-1].size(1), 'pomo_size': data[-1].size(1)}
                 self.meta_model.train()
                 if self.meta_params['meta_method'] in ['reptile', 'fomaml']:
@@ -241,8 +249,7 @@ class CVRPTrainer:
                     bootstrap_optimizer = Optimizer(bootstrap_model.parameters(), **self.optimizer_params['optimizer'])
                     bootstrap_optimizer.load_state_dict(optimizer.state_dict())
             for step in range(self.meta_params['L']):
-                idx = torch.randperm(meta_batch_size)[:batch_size]
-                data = (train_data[0][idx], train_data[1][idx], train_data[2][idx]) if self.meta_params['meta_method'] != "reptile" else self._get_data(meta_batch_size, task_params)
+                data = self._get_data(batch_size, task_params)
                 if self.meta_params['meta_method'] == 'maml':
                     avg_score, avg_loss, bootstrap_model = self._train_one_batch_maml(bootstrap_model, data, Env(**env_params), create_graph=False)
                 else:
@@ -253,7 +260,7 @@ class CVRPTrainer:
             if self.meta_params['meta_method'] == 'maml':
                 val_loss, kl_loss = self._fast_val(fast_weight, data=val_data, mode="maml", bootstrap_model=bootstrap_model)
                 print(val_loss, kl_loss)
-                loss = (self.meta_params['beta'] * val_loss + (1 - self.meta_params['beta']) * kl_loss) / self.meta_params['B']
+                loss = (self.meta_params['beta'] * val_loss + (1 - self.meta_params['beta']) * kl_loss) * task_w
                 self.meta_optimizer.zero_grad()
                 loss.backward()
                 for i, group in enumerate(self.meta_optimizer.param_groups):
@@ -262,7 +269,7 @@ class CVRPTrainer:
             elif self.meta_params['meta_method'] == 'fomaml':
                 val_loss, kl_loss = self._fast_val(task_model, data=val_data, mode="fomaml", bootstrap_model=bootstrap_model)
                 print(val_loss, kl_loss)
-                loss = (self.meta_params['beta'] * val_loss + (1 - self.meta_params['beta']) * kl_loss) / self.meta_params['B']
+                loss = (self.meta_params['beta'] * val_loss + (1 - self.meta_params['beta']) * kl_loss) * task_w
                 optimizer.zero_grad()
                 loss.backward()
                 for i, group in enumerate(optimizer.param_groups):
@@ -285,7 +292,7 @@ class CVRPTrainer:
                     p.grad = meta_grad_dict[(i, j)]
             self.meta_optimizer.step()
         elif self.meta_params['meta_method'] == 'reptile':
-            state_dict = {params_key: (self.meta_model.state_dict()[params_key] + self.alpha * torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights], dim=0), dim=0)) for params_key in self.meta_model.state_dict()}
+            state_dict = {params_key: (self.meta_model.state_dict()[params_key] + self.alpha * torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights], dim=0).float(), dim=0)) for params_key in self.meta_model.state_dict()}
             self.meta_model.load_state_dict(state_dict)
 
         # Log Once, for each epoch
@@ -367,8 +374,12 @@ class CVRPTrainer:
         w_t, (beta1, beta2), eps = [], self.meta_optimizer.param_groups[0]['betas'], self.meta_optimizer.param_groups[0]['eps']
         lr, weight_decay = self.optimizer_params['optimizer']['lr'], self.optimizer_params['optimizer']['weight_decay']
         for i, ((name, param), grad) in enumerate(zip(fast_weight.items(), gradients)):
+            print(i, name)
             if self.meta_optimizer.state_dict()['state'] != {}:
-                i = i if self.model_params['meta_update_encoder'] else i + 82  # (with norm layer): i \in [0, 86], where encoder \in [0, 81] + decoder \in [82, 86]
+                # (with batch/instance norm layer): i \in [0, 86], where encoder \in [0, 81] + decoder \in [82, 86]
+                # (with rezero norm layer): i \in [0, 74], where encoder \in [0, 69] + decoder \in [70, 74]
+                # (without norm layer): i \in [0, 62], where encoder \in [0, 57] + decoder \in [58, 62]
+                i = i if self.model_params['meta_update_encoder'] else i + 82
                 state = self.meta_optimizer.state_dict()['state'][i]
                 step, exp_avg, exp_avg_sq = state['step'], state['exp_avg'], state['exp_avg_sq']
                 step += 1

@@ -1,6 +1,7 @@
 import os, time
 import pickle
 from logging import getLogger
+import numpy as np
 import torch
 from torch.optim import Adam as Optimizer
 
@@ -42,20 +43,28 @@ class TSPTester:
 
         # ENV and MODEL
         self.model = Model(**self.model_params)
-        self.env = Env(**self.env_params)  # we assume instances in the test/fine-tune dataset have the same problem size.
+        self.path_list = None
         self.optimizer = Optimizer(self.model.parameters(), **self.fine_tune_params['optimizer'])
         self.score_list, self.aug_score_list, self.gap_list, self.aug_gap_list = [], [], [], []
 
         # load dataset
-        self.test_data = torch.Tensor(load_dataset(tester_params['test_set_path'])[: self.tester_params['test_episodes']])
-        opt_sol = load_dataset(tester_params['test_set_opt_sol_path'])[: self.tester_params['test_episodes']]  # [(obj, route), ...]
-        self.opt_sol = [i[0] for i in opt_sol]
+        if tester_params['test_set_path'].endswith(".pkl"):
+            self.test_data = torch.Tensor(load_dataset(tester_params['test_set_path'])[: self.tester_params['test_episodes']])
+            opt_sol = load_dataset(tester_params['test_set_opt_sol_path'])[: self.tester_params['test_episodes']]  # [(obj, route), ...]
+            self.opt_sol = [i[0] for i in opt_sol]
+            env_params = {'problem_size': self.test_data.size(1), 'pomo_size': self.test_data.size(1)}
+            self.env = Env(**env_params)  # we assume instances in the test/fine-tune dataset have the same problem size.
+        else:
+            # for solving instances with TSPLIB format
+            self.path_list = [os.path.join(tester_params['test_set_path'], f) for f in sorted(os.listdir(tester_params['test_set_path']))] \
+                if os.path.isdir(tester_params['test_set_path']) else [tester_params['test_set_path']]
+            assert self.path_list[-1].endswith(".tsp")
 
         # Restore
         model_load = tester_params['model_load']
         checkpoint_fullname = '{path}/checkpoint-{epoch}.pt'.format(**model_load)
         checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
-        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.model.load_state_dict(checkpoint['model_state_dict'], strict=True)
         # self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.logger.info(">> Model loaded from {}".format(checkpoint_fullname))
 
@@ -64,37 +73,43 @@ class TSPTester:
 
     def run(self):
         start_time = time.time()
-        if self.tester_params['test_robustness']:
-            episode = 0
-            test_data = self.test_data
-            opt_sol = [0] * test_data.size(0)
-            while episode < test_data.size(0):
-                remaining = test_data.size(0) - episode
-                batch_size = min(self.tester_params['test_batch_size'], remaining)
-                data = test_data[episode: episode + batch_size]
-                test_data[episode: episode + batch_size], opt_sol[episode: episode + batch_size] = self._generate_x_adv(data, eps=50.0)
-                episode += batch_size
-            self.test_data = test_data.cpu().numpy()
-            self.opt_sol = [i[0] for i in opt_sol]
-            # save the adv dataset
-            filename = os.path.split(self.tester_params['test_set_path'])[-1]
-            save_dataset(self.test_data, './adv_{}'.format(filename))
-            save_dataset(opt_sol, './sol_adv_{}'.format(filename))
-        if self.fine_tune_params['enable']:
-            # fine-tune model on (little) data which has the same distribution of the test dataset (few-shot)
-            start = self.tester_params['test_episodes']
-            self.fine_tune_data = torch.Tensor(load_dataset(self.tester_params['test_set_path'])[start: start + self.fine_tune_params['fine_tune_episodes']])
-            self._fine_tune_and_test()
-        else:
-            # test the model on test dataset (zero-shot)
-            self._test(store_res=True)
-        print(">> Evaluation on {} finished within {:.2f}s".format(self.tester_params['test_set_path'], time.time() - start_time))
 
-        # save results to file
-        with open(os.path.split(self.tester_params['test_set_path'])[-1], 'wb') as f:
-            result = {"score_list": self.score_list, "aug_score_list": self.aug_score_list, "gap_list": self.gap_list, "aug_gap_list": self.aug_gap_list}
-            pickle.dump(result, f, pickle.HIGHEST_PROTOCOL)
-            print(">> Save final results to {}".format(os.path.split(self.tester_params['test_set_path'])[-1]))
+        if self.path_list:
+            for path in self.path_list:
+                self._solve_tsplib(path)
+        else:
+            if self.tester_params['test_robustness']:
+                episode = 0
+                test_data = self.test_data
+                opt_sol = [0] * test_data.size(0)
+                while episode < test_data.size(0):
+                    remaining = test_data.size(0) - episode
+                    batch_size = min(self.tester_params['test_batch_size'], remaining)
+                    data = test_data[episode: episode + batch_size]
+                    test_data[episode: episode + batch_size], opt_sol[episode: episode + batch_size] = self._generate_x_adv(data, eps=50.0, return_opt=True)
+                    episode += batch_size
+                self.test_data = test_data.cpu().numpy()
+                self.opt_sol = [i[0] for i in opt_sol]
+                # save the adv dataset
+                filename = os.path.split(self.tester_params['test_set_path'])[-1]
+                save_dataset(self.test_data, './adv_{}'.format(filename))
+                save_dataset(opt_sol, './sol_adv_{}'.format(filename))
+            if self.fine_tune_params['enable']:
+                # fine-tune model on (little) data which has the same distribution of the test dataset (few-shot)
+                start = self.tester_params['test_episodes']
+                self.fine_tune_data = torch.Tensor(load_dataset(self.tester_params['test_set_path'])[start: start + self.fine_tune_params['fine_tune_episodes']])
+                # self.fine_tune_data = augment_xy_data_by_8_fold(self.fine_tune_data)
+                self._fine_tune_and_test()
+            else:
+                # test the model on test dataset (zero-shot)
+                self._test(store_res=True)
+            print(">> Evaluation on {} finished within {:.2f}s".format(self.tester_params['test_set_path'], time.time() - start_time))
+
+            # save results to file
+            with open(os.path.split(self.tester_params['test_set_path'])[-1], 'wb') as f:
+                result = {"score_list": self.score_list, "aug_score_list": self.aug_score_list, "gap_list": self.gap_list, "aug_gap_list": self.aug_gap_list}
+                pickle.dump(result, f, pickle.HIGHEST_PROTOCOL)
+                print(">> Save final results to {}".format(os.path.split(self.tester_params['test_set_path'])[-1]))
 
     def _test(self, store_res=True):
         self.time_estimator.reset()
@@ -163,7 +178,6 @@ class TSPTester:
         # Return
         aug_reward = reward.reshape(aug_factor, batch_size, self.env.pomo_size)
         # shape: (augmentation, batch, pomo)
-
         max_pomo_reward, _ = aug_reward.max(dim=2)  # get best results from pomo
         # shape: (augmentation, batch)
         no_aug_score = -max_pomo_reward[0, :].float()  # negative sign to make positive value
@@ -185,10 +199,6 @@ class TSPTester:
         score_list, aug_score_list, gap_list, aug_gap_list = [], [], [], []
 
         for k in range(self.fine_tune_params['k']):
-            if k in [int(self.fine_tune_params['k'] * 0.4)] and self.fine_tune_params['lr_decay']:
-                for group in self.optimizer.param_groups:
-                    group["lr"] /= 10
-                    print(">> LR decay to {}".format(group["lr"]))
             # score, aug_score, gap, aug_gap = self._test(store_res=False)
             # score_list.append(score); aug_score_list.append(aug_score)
             # gap_list.append(gap); aug_gap_list.append(aug_gap)
@@ -199,6 +209,18 @@ class TSPTester:
                 batch_size = min(self.fine_tune_params['fine_tune_batch_size'], remaining)
                 self._fine_tune_one_batch(self.fine_tune_data[episode:episode+batch_size])
                 episode += batch_size
+
+            # shuffle the data
+            idx = torch.randperm(fine_tune_episode)
+            self.fine_tune_data = self.fine_tune_data[idx]
+
+        checkpoint_dict = {
+            'epoch': k+1,
+            'model_state_dict': self.model.state_dict(),
+            'optimizer_state_dict': self.optimizer.state_dict(),
+            'result_log': None
+        }
+        torch.save(checkpoint_dict, '{}/checkpoint-{}.pt'.format(self.result_folder, k+1))
 
         score, aug_score, gap, aug_gap = self._test(store_res=True)
         score_list.append(score); aug_score_list.append(aug_score)
@@ -252,7 +274,7 @@ class TSPTester:
         loss_mean.backward()
         self.optimizer.step()
 
-    def _generate_x_adv(self, data, eps=10.0):
+    def _generate_x_adv(self, data, eps=10.0, return_opt=False):
         """
         Generate adversarial data based on the current model, also need to generate optimal sol for x_adv.
         """
@@ -290,6 +312,34 @@ class TSPTester:
             data = Variable(data, requires_grad=False)
 
         # generate opt sol
-        opt_sol = solve_all_gurobi(data)
+        if return_opt:
+            return data, solve_all_gurobi(data)
 
-        return data, opt_sol
+        return data
+
+    def _solve_tsplib(self, path):
+        """
+        Solving one instance with TSPLIB format.
+        """
+        file = open(path, "r")
+        lines = [ll.strip() for ll in file]
+        i = 0
+        while i < len(lines):
+            line = lines[i]
+            if line.startswith("DIMENSION"):
+                dimension = int(line.split(':')[1])
+            elif line.startswith('NODE_COORD_SECTION'):
+                locations = np.loadtxt(lines[i + 1:i + 1 + dimension], dtype=float)
+                i = i + dimension
+            i += 1
+        original_locations = locations[:, 1:]
+        original_locations = np.expand_dims(original_locations, axis=0)  # [1, n, 2]
+        locations = torch.Tensor(original_locations / original_locations.max())  # Scale location coordinates to [0, 1]
+        loc_scaler = original_locations.max()
+
+        env_params = {'problem_size': locations.size(1), 'pomo_size': locations.size(1), 'loc_scaler': loc_scaler}
+        self.env = Env(**env_params)
+        _, _, no_aug_score, aug_score = self._test_one_batch(locations)
+        no_aug_score = torch.round(no_aug_score * loc_scaler).long()
+        aug_score = torch.round(aug_score * loc_scaler).long()
+        print(">> Finish solving {} -> no_aug: {} aug: {}".format(path, no_aug_score, aug_score))

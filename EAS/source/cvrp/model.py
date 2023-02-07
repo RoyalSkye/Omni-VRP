@@ -289,15 +289,19 @@ class Add_And_Normalization_Module(nn.Module):
         embedding_dim = model_params['embedding_dim']
         if model_params["norm"] == "batch":
             self.norm = nn.BatchNorm1d(embedding_dim, affine=True, track_running_stats=True)
+        elif model_params["norm"] == "batch_no_track":
+            self.norm = nn.BatchNorm1d(embedding_dim, affine=True, track_running_stats=False)
         elif model_params["norm"] == "instance":
             self.norm = nn.InstanceNorm1d(embedding_dim, affine=True, track_running_stats=False)
+        elif model_params["norm"] == "rezero":
+            self.norm = torch.nn.Parameter(torch.Tensor([0.]), requires_grad=True)
         else:
             self.norm = None
 
     def forward(self, input1, input2):
         # input.shape: (batch, problem, embedding)
-        added = input1 + input2
         if isinstance(self.norm, nn.InstanceNorm1d):
+            added = input1 + input2
             transposed = added.transpose(1, 2)
             # shape: (batch, embedding, problem)
             normalized = self.norm(transposed)
@@ -305,11 +309,14 @@ class Add_And_Normalization_Module(nn.Module):
             back_trans = normalized.transpose(1, 2)
             # shape: (batch, problem, embedding)
         elif isinstance(self.norm, nn.BatchNorm1d):
+            added = input1 + input2
             batch_s, problem_s, embedding_dim = input1.size(0), input1.size(1), input1.size(2)
             normalized = self.norm(added.reshape(batch_s * problem_s, embedding_dim))
             back_trans = normalized.reshape(batch_s, problem_s, embedding_dim)
+        elif isinstance(self.norm, nn.Parameter):
+            back_trans = input1 + self.norm * input2
         else:
-            back_trans = added
+            back_trans = input1 + input2
 
         return back_trans
 

@@ -55,7 +55,7 @@ def get_random_problems(batch_size, problem_size, num_modes=0, cdist=0, distribu
     # save as List
     if path is not None:
         if problem == "tsp":
-            with open(os.path.join(path, "tsp{}_{}_{}_{}.pkl".format(problem_size, distribution, num_modes, cdist)), "wb") as f:
+            with open(os.path.join(path, "tsp{}_{}.pkl".format(problem_size, distribution)), "wb") as f:
                 pickle.dump(problems.tolist(), f, pickle.HIGHEST_PROTOCOL)
         else:
             with open(os.path.join(path, "cvrp{}_{}.pkl".format(problem_size, distribution)), "wb") as f:
@@ -102,7 +102,7 @@ def generate_gaussian_mixture_tsp(dataset_size, graph_size, num_modes=0, cdist=0
 
     def gaussian_mixture(graph_size=100, num_modes=0, cdist=1):
         '''
-        GMM create one instance of TSP-50, using cdist
+        GMM create one instance of TSP-100, using cdist
         '''
         from sklearn.preprocessing import MinMaxScaler
         nums = np.random.multinomial(graph_size, np.ones(num_modes) / num_modes)
@@ -259,8 +259,8 @@ if __name__ == "__main__":
     #     for dist in ["uniform"]:
     #         print(">> Generating TSP instances following {} distribution!".format(dist))
     #         get_random_problems(2000, s, distribution=dist, path=path, problem="tsp")
-    for m, c in [(3, 5), (6, 20), (9, 50)]:
-        get_random_problems(2000, 200, num_modes=m, cdist=c, distribution="gaussian_mixture", path=path, problem="tsp")
+    for m, c in [(2, 5)]:
+        get_random_problems(2000, 200, num_modes=m, cdist=c, distribution="gaussian_mixture", path=path, problem="cvrp")
 
     # var-size test data
     # for s in [50, 100, 150, 200, 300, 500, 1000]:
@@ -268,9 +268,9 @@ if __name__ == "__main__":
     #     get_random_problems(15000, s, distribution="uniform", path=path, problem="tsp")
 
     # data = generate_gaussian_mixture_tsp(dataset_size=1, graph_size=150, num_modes=3, cdist=10)
-    # data = load_dataset("../data/CVRP/Size_Distribution/cvrp100_uniform.pkl")
+    # data = load_dataset("../data/TSP/Size_Distribution/tsp200_gaussian_mixture_2_5.pkl")
     # print(data[0])
     # print(type(data), data.size(), data)
     # x, y = [i[0] for i in data[1]], [i[-1] for i in data[1]]
     # x, y = data[0, :, 0].tolist(), data[0, :, -1].tolist()
-    # show([x], [y], label=["Gaussian Mixture"], title="TSP300", xdes="x", ydes="y", path="./tsp.pdf")
+    # show([x], [y], label=["Gaussian Mixture"], title="TSP200", xdes="x", ydes="y", path="./tsp.pdf")

@@ -38,6 +38,7 @@ class CVRPEnv:
         self.env_params = env_params
         self.problem_size = env_params['problem_size']
         self.pomo_size = env_params['pomo_size']
+        self.loc_scaler = env_params['loc_scaler'] if 'loc_scaler' in env_params.keys() else None
 
         self.FLAG__use_saved_problems = False
         self.saved_depot_xy = None
@@ -232,6 +233,9 @@ class CVRPEnv:
         rolled_seq = ordered_seq.roll(dims=2, shifts=-1)
         segment_lengths = ((ordered_seq-rolled_seq)**2).sum(3).sqrt()
         # shape: (batch, pomo, selected_list_length)
+
+        if self.loc_scaler:
+            segment_lengths = torch.round(segment_lengths * self.loc_scaler) / self.loc_scaler
 
         travel_distances = segment_lengths.sum(2)
         # shape: (batch, pomo)

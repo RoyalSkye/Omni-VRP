@@ -37,7 +37,7 @@ def run_eas_emb(model, instance_data, problem_size, config, get_episode_data_fn,
 
         with torch.no_grad():
             aug_data = augment_and_repeat_episode_data_fn(episode_data, problem_size, p_runs, AUG_S)
-            env = GROUP_ENVIRONMENT(aug_data, problem_size, config.round_distances)
+            env = GROUP_ENVIRONMENT(aug_data, problem_size, config.round_distances, loc_scaler=config.loc_scaler)
             group_state, reward, done = env.reset(group_size=group_s)
             # model.reset(group_state)  # Generate the embeddings (i.e., k, v, and single_head_key)
             model.pre_forward(group_state)

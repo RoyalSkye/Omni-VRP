@@ -106,7 +106,7 @@ class GROUP_STATE:
 
 class GROUP_ENVIRONMENT:
 
-    def __init__(self, data, problem_size, round_distances):
+    def __init__(self, data, problem_size, round_distances, loc_scaler=1.0):
         depot_xy = data[0]
         # depot_xy.shape = (batch, 1, 2)
         node_xy = data[1]
@@ -119,6 +119,7 @@ class GROUP_ENVIRONMENT:
         self.group_state = None
         self.problem_size = problem_size
         self.round_distances = round_distances
+        self.loc_scaler = loc_scaler
 
         all_node_xy = torch.cat((depot_xy, node_xy), dim=1)
         # shape = (batch, problem+1, 2)
@@ -163,7 +164,7 @@ class GROUP_ENVIRONMENT:
         # size = (batch, group, selected_count)
 
         if self.round_distances:
-            segment_lengths = torch.round(segment_lengths * 1000) / 1000
+            segment_lengths = torch.round(segment_lengths * self.loc_scaler) / self.loc_scaler
 
         travel_distances = segment_lengths.sum(2)
         # size = (batch, group)

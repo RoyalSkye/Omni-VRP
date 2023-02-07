@@ -245,7 +245,7 @@ def run_eas_lay(model, instance_data, problem_size, config, get_episode_data_fn,
 
         with torch.no_grad():
             aug_data = augment_and_repeat_episode_data_fn(episode_data, problem_size, p_runs, AUG_S)
-            env = GROUP_ENVIRONMENT(aug_data, problem_size, config.round_distances)
+            env = GROUP_ENVIRONMENT(aug_data, problem_size, config.round_distances, loc_scaler=config.loc_scaler)
             # Replace the decoder of the loaded model with the modified decoder with added layers
             model_modified = replace_decoder(model, batch_s, original_decoder_state_dict, config.problem, config.model_params).cuda()
             group_state, reward, done = env.reset(group_size=group_s)

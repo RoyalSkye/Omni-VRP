@@ -45,4 +45,12 @@ def read_instance_vrp(path):
     locations = original_locations / 1000  # Scale location coordinates to [0, 1]
     demand = demand[1:, 1:].reshape((1, -1))
 
+    # original_locations: unnormalized with shape of (1, n+1, 2)
+    # locations: normalized to [0, 1] with shape of (1, n+1, 2)
+    # demand: unnormalized with shape of (1, n)
+    # capacity: with shape of (1)
     return original_locations, locations, demand, capacity
+
+
+if __name__ == "__main__":
+    read_instance_vrp("../X-n101-k25.vrp")

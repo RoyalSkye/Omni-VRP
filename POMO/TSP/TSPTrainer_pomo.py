@@ -85,11 +85,11 @@ class TSPTrainer:
             self.logger.info('=================================================================')
 
             # lr decay (by 10) to speed up convergence at 90th iteration
-            if epoch in [int(self.meta_params['epochs'] * 0.9)]:
-                self.optimizer_params['optimizer']['lr'] /= 10
-                for group in self.optimizer.param_groups:
-                    group["lr"] /= 10
-                    print(">> LR decay to {}".format(group["lr"]))
+            # if epoch in [int(self.meta_params['epochs'] * 0.9)]:
+            #     self.optimizer_params['optimizer']['lr'] /= 10
+            #     for group in self.optimizer.param_groups:
+            #         group["lr"] /= 10
+            #         print(">> LR decay to {}".format(group["lr"]))
 
             # Train
             train_score, train_loss = self._train_one_epoch(epoch)

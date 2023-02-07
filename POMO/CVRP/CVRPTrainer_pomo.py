@@ -84,11 +84,11 @@ class CVRPTrainer:
             self.logger.info('=================================================================')
 
             # lr decay (by 10) to speed up convergence at 90th and 95th iterations
-            if epoch in [int(self.meta_params['epochs'] * 0.9)]:
-                self.optimizer_params['optimizer']['lr'] /= 10
-                for group in self.optimizer.param_groups:
-                    group["lr"] /= 10
-                    print(">> LR decay to {}".format(group["lr"]))
+            # if epoch in [int(self.meta_params['epochs'] * 0.9)]:
+            #     self.optimizer_params['optimizer']['lr'] /= 10
+            #     for group in self.optimizer.param_groups:
+            #         group["lr"] /= 10
+            #         print(">> LR decay to {}".format(group["lr"]))
 
             # Train
             train_score, train_loss = self._train_one_epoch(epoch)
@@ -303,7 +303,7 @@ class CVRPTrainer:
             # only use lkh3 at the first iteration of updating task weights
             if self.meta_params["solver"] == "lkh3_offline":
                 if selected not in self.val_data.keys():
-                    self.val_data[selected] = data
+                    self.val_data[selected] = data  # (depot, loc, demand, capacity)
                     opts = argparse.ArgumentParser()
                     opts.cpus, opts.n, opts.progress_bar_mininterval = None, None, 0.1
                     dataset = [attr.cpu().tolist() for attr in data]
@@ -316,7 +316,7 @@ class CVRPTrainer:
                 data = [attr[idx] for attr in self.val_data[selected]]
                 data = (data[0], data[1], data[2] / data[3].view(-1, 1))
 
-            model_score = self._fast_val(self.meta_model, data=data, mode="eval", return_all=True)
+            model_score = self._fast_val(self.model, data=data, return_all=True)
             model_score = model_score.tolist()
 
             if self.meta_params["solver"] == "lkh3_offline":

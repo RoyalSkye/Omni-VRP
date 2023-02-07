@@ -24,6 +24,7 @@ from source.eas_lay import run_eas_lay
 from source.eas_tab import run_eas_tab
 from source.tsp.model import TSPModel as TSP_model
 from source.tsp.read_data import read_instance_pkl as TSP_read_instance_pkl
+from source.tsp.read_data import read_instance_tsp
 from source.tsp.utilities import augment_and_repeat_episode_data as TSP_augment_and_repeat_episode_data
 from source.tsp.utilities import get_episode_data as TSP_get_episode_data
 
@@ -34,17 +35,18 @@ def get_config():
     parser.add_argument('-problem', default="TSP", type=str, choices=['TSP', 'CVRP'])
     parser.add_argument('-method', default="eas-emb", type=str, choices=['eas-emb', 'eas-lay', 'eas-tab'], help="EAS method")
     parser.add_argument('-model_path', default="../pretrained/pomo_pretrained/checkpoint-30500.pt", type=str, help="Path of the trained model weights")
-    parser.add_argument('-instances_path', default="../data/TSP/Size/tsp100_gaussian.pkl", type=str, help="Path of the instances")
-    parser.add_argument('-sol_path', default="../data/TSP/Size/opt_tsp100_uniform.pkl", type=str, help="Path of the optimal sol")
-    parser.add_argument('-num_instances', default=10000, type=int, help="Maximum number of instances that should be solved")
+    parser.add_argument('-instances_path', default="../data/TSP/Size_Distribution/tsp200_rotation.pkl", type=str, help="Path of the instances")
+    parser.add_argument('-sol_path', default="../data/TSP/Size_Distribution/concorde/tsp200_rotationoffset0n1000-concorde.pkl", type=str, help="Path of the optimal sol")
+    parser.add_argument('-num_instances', default=1000, type=int, help="Maximum number of instances that should be solved")
     parser.add_argument('-instances_offset', default=0, type=int)
     parser.add_argument('-round_distances', default=False, action='store_true', help="Round distances to the nearest integer. Required to solve .vrp instances")
+    parser.add_argument('-loc_scaler', default=1.0, type=float, help="The scaler of coordinates to valid range [0, 1]")
     parser.add_argument('-max_iter', default=200, type=int, help="Maximum number of EAS iterations")
     parser.add_argument('-max_runtime', default=100000, type=int, help="Maximum runtime of EAS per batch in seconds")
     parser.add_argument('-batch_size', default=150, type=int)  # Set to 1 for single instance search
     parser.add_argument('-p_runs', default=1, type=int)  # If batch_size is 1, set this to > 1 to do multiple runs for the instance in parallel
     parser.add_argument('-output_path', default="EAS_results", type=str)
-    parser.add_argument('-norm', default="none", choices=['instance', 'batch', 'none'], type=str)
+    parser.add_argument('-norm', default="batch_no_track", choices=['instance', 'batch', 'batch_no_track', 'none'], type=str)
     parser.add_argument('-gpu_id', default=2, type=int)
     parser.add_argument('-seed', default=2023, type=int, help="random seed")
 
@@ -86,34 +88,46 @@ def read_instance_data(config):
             instance_data_scaled = instance_data[0], instance_data[1]
 
     else:
-        # Read in .vrp instance(s) that have the VRPLIB format. In this case the distances between customers
-        # should be rounded.
-
+        # Read in .vrp instance(s) that have the VRPLIB format. In this case the distances between customers should be rounded.
         assert config.round_distances
 
-        if config.instances_path.endswith(".vrp"):
+        if config.instances_path.endswith(".vrp") or config.instances_path.endswith(".tsp"):
             # Read in a single instance
             instance_file_paths = [config.instances_path]
-        elif os.path.isdir(config.instances_path):
-            # or all instances in the given directory.
-            instance_file_paths = [os.path.join(config.instances_path, f) for f in
-                                   sorted(os.listdir(config.instances_path))]
-            instance_file_paths = instance_file_paths[
-                                  config.instances_offset:config.instances_offset + config.num_instances]
+        else:
+            print("Not supported for Dir now.")
+            raise NotImplementedError
+
+        # elif os.path.isdir(config.instances_path):
+        #     # or all instances in the given directory.
+        #     instance_file_paths = [os.path.join(config.instances_path, f) for f in sorted(os.listdir(config.instances_path))]
+        #     instance_file_paths = instance_file_paths[config.instances_offset:config.instances_offset + config.num_instances]
 
         # Read in the first instance only to determine the problem_size
-        _, locations, _, _ = read_instance_vrp(instance_file_paths[0])
-        problem_size = locations.shape[1] - 1
-
-        # Prepare empty numpy array to store instance data
-        instance_data_scaled = (np.zeros((len(instance_file_paths), locations.shape[1], 2)),
-                                np.zeros((len(instance_file_paths), locations.shape[1] - 1)))
-
-        # Read in all instances
-        for idx, file in enumerate(instance_file_paths):
-            # logging.info(f'Instance: {os.path.split(file)[-1]}')
-            original_locations, locations, demand, capacity = read_instance_vrp(file)
-            instance_data_scaled[0][idx], instance_data_scaled[1][idx] = locations, demand / capacity
+        if config.instances_path.endswith(".vrp"):
+            config.loc_scaler = 1000
+            _, locations, _, _ = read_instance_vrp(instance_file_paths[0])
+            problem_size = locations.shape[1] - 1
+            # Prepare empty numpy array to store instance data
+            instance_data_scaled = (np.zeros((len(instance_file_paths), locations.shape[1], 2)),
+                                    np.zeros((len(instance_file_paths), locations.shape[1] - 1)))
+            # Read in all instances
+            for idx, file in enumerate(instance_file_paths):
+                # logging.info(f'Instance: {os.path.split(file)[-1]}')
+                original_locations, locations, demand, capacity = read_instance_vrp(file)
+                instance_data_scaled[0][idx], instance_data_scaled[1][idx] = locations, demand / capacity
+        elif config.instances_path.endswith(".tsp"):
+            _, locations, _ = read_instance_tsp(instance_file_paths[0])
+            problem_size = locations.shape[1]
+            # Prepare empty numpy array to store instance data
+            instance_data_scaled = (np.zeros((len(instance_file_paths), locations.shape[1], 2)), None)
+            # Read in all instances
+            for idx, file in enumerate(instance_file_paths):
+                # logging.info(f'Instance: {os.path.split(file)[-1]}')
+                original_locations, locations, loc_scaler = read_instance_tsp(file)
+                instance_data_scaled[0][idx] = locations
+            config.loc_scaler = loc_scaler
+            config.original_loc = torch.Tensor(original_locations)
 
     return instance_data_scaled, problem_size
 
@@ -195,26 +209,45 @@ def search(run_id, config):
 
     if config.problem == "CVRP" and not config.instances_path.endswith(".pkl"):
         # For instances with the CVRPLIB format the costs need to be adjusted to match the original coordinates
-        perf = np.round(perf * 1000).astype('int')
+        perf = np.round(perf * config.loc_scaler).astype('int')
+    elif config.problem == "TSP" and not config.instances_path.endswith(".pkl"):
+        # For instances with the TSPLIB format the costs need to be adjusted to match the original coordinates
+        perf = np.round(perf * config.loc_scaler).astype('int')
+        # [!] double-check, we regard best_obj as our final result
+        # since the current implementation is inaccurate (e.g, it may even outperform the obj of optimal sol)
+        best_sol, best_obj = best_solutions.tolist()[0], 0
+        for i in range(problem_size):
+            if i == problem_size - 1:
+                best_obj += ((config.original_loc[0, best_sol[i]] - config.original_loc[0, best_sol[0]]) ** 2).sum().sqrt().item()
+                break
+            best_obj += torch.round(((config.original_loc[0, best_sol[i]] - config.original_loc[0, best_sol[i+1]]) ** 2).sum().sqrt()).item()
+        print(">> best_obj {} = [{}]".format(best_obj, np.round(best_obj).astype('int')))
 
     # compute gaps
-    with open(config.sol_path, 'rb') as f:
-        opt_sol = pickle.load(f)[config.instances_offset: config.instances_offset+config.num_instances]  # [(obj, route), ...]
-        print(">> Load {} optimal solutions ({}) from {}".format(len(opt_sol), type(opt_sol), config.sol_path))
-    assert len(opt_sol) == len(perf)
-    gap_list = [(perf[i] - opt_sol[i][0]) / opt_sol[i][0] * 100 for i in range(len(perf))]
+    if config.instances_path.endswith(".pkl"):
+        with open(config.sol_path, 'rb') as f:
+            opt_sol = pickle.load(f)[config.instances_offset: config.instances_offset+config.num_instances]  # [(obj, route), ...]
+            print(">> Load {} optimal solutions ({}) from {}".format(len(opt_sol), type(opt_sol), config.sol_path))
+        assert len(opt_sol) == len(perf)
+        gap_list = [(perf[i] - opt_sol[i][0]) / opt_sol[i][0] * 100 for i in range(len(perf))]
 
-    logging.info(f"EAS Method: {config.method}, Seed: {config.seed}")
-    logging.info(f"Mean costs: {np.mean(perf)}")
-    logging.info(f"Mean gaps: {sum(gap_list)/len(gap_list)}%")
-    logging.info(f"Runtime: {runtime}s")
-    logging.info("MEM: " + str(cutorch.max_memory_reserved(config.gpu_id) / 1024 / 1024) + "MB")
-    logging.info(f"Num. instances: {len(perf)}")
+        logging.info(f"EAS Method: {config.method}, Seed: {config.seed}")
+        logging.info(f"Mean costs: {np.mean(perf)}")
+        logging.info(f"Mean gaps: {sum(gap_list)/len(gap_list)}%")
+        logging.info(f"Runtime: {runtime}s")
+        logging.info("MEM: " + str(cutorch.max_memory_reserved(config.gpu_id) / 1024 / 1024) + "MB")
+        logging.info(f"Num. instances: {len(perf)}")
 
-    res = {"EAS_score_list": perf.tolist(), "EAS_gap_list": gap_list}
+        res = {"EAS_score_list": perf.tolist(), "EAS_gap_list": gap_list}
 
-    pickle.dump(res, open(os.path.join(config.output_path, "./Results_{}.pkl".format(config.method)), 'wb'), pickle.HIGHEST_PROTOCOL)
-    # pickle.dump(res, open("./Results_{}.pkl".format(config.method), 'wb'), pickle.HIGHEST_PROTOCOL)
+        pickle.dump(res, open(os.path.join(config.output_path, "./Results_{}.pkl".format(config.method)), 'wb'), pickle.HIGHEST_PROTOCOL)
+    else:
+        logging.info(f"EAS Method: {config.method}, Seed: {config.seed}")
+        logging.info(f"Mean costs: {np.mean(perf)}")
+        logging.info(f"Runtime: {runtime}s")
+        logging.info("MEM: " + str(cutorch.max_memory_reserved(config.gpu_id) / 1024 / 1024) + "MB")
+        logging.info(f"Num. instances: {len(perf)}")
+        print(">> Solving {}, with sol {}".format(config.instances_path, perf))
 
 
 def seed_everything(seed=2022):

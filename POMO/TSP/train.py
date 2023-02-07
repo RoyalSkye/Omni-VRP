@@ -30,6 +30,7 @@ model_params = {
     'ff_hidden_dim': 512,
     'eval_type': 'argmax',
     'meta_update_encoder': True,
+    # 'norm': 'batch_no_track'
 }
 
 optimizer_params = {
@@ -45,7 +46,7 @@ trainer_params = {
     'seed': 1234,
     # 'batch_size': 64,
     'logging': {
-        'model_save_interval': 25000,
+        'model_save_interval': 50000,
         'img_save_interval': 100,
         'log_image_params_1': {
             'json_foldername': 'log_image_style',
@@ -58,8 +59,8 @@ trainer_params = {
     },
     'model_load': {
         'enable': False,  # enable loading pre-trained model
-        # 'path': '../../pretrained/debug',  # directory path of pre-trained model and log files saved.
-        # 'epoch': 100000,  # epoch version of pre-trained model to laod.
+        'path': '../../pretrained/debug',  # directory path of pre-trained model and log files saved.
+        'epoch': 100000,  # epoch version of pre-trained model to laod.
     },
 }
 

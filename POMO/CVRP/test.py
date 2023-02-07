@@ -15,8 +15,8 @@ CUDA_DEVICE_NUM = 0
 # parameters
 
 env_params = {
-    'problem_size': 100,
-    'pomo_size': 100,
+    'problem_size': 200,
+    'pomo_size': 200,
 }
 
 model_params = {
@@ -28,7 +28,7 @@ model_params = {
     'logit_clipping': 10,
     'ff_hidden_dim': 512,
     'eval_type': 'argmax',
-    'norm': None
+    'norm': 'batch_no_track'
 }
 
 
@@ -40,25 +40,24 @@ tester_params = {
         'path': '../../pretrained/pomo_pretrained',  # directory path of pre-trained model and log files saved.
         'epoch': 30500,  # epoch version of pre-trained model to load.
     },
-    'test_episodes': 10000,
-    'test_batch_size': 10000,
+    'test_episodes': 1000,
+    'test_batch_size': 1000,
     'augmentation_enable': True,
     'test_robustness': False,
     'aug_factor': 8,
     'aug_batch_size': 100,
-    'test_set_path': '../../data/CVRP/Size_Distribution/cvrp100_uniform.pkl',
-    'test_set_opt_sol_path': '../../data/CVRP/Size_Distribution/hgs/cvrp100_uniformoffset0n10000-hgs.pkl'
+    'test_set_path': '../../data/CVRP/Size_Distribution/cvrp200_rotation.pkl',
+    'test_set_opt_sol_path': '../../data/CVRP/Size_Distribution/hgs/cvrp200_rotationoffset0n1000-hgs.pkl'
 }
 
 fine_tune_params = {
     'enable': False,  # evaluate few-shot generalization
     'fine_tune_episodes': 1000,  # how many data used to fine-tune the pretrained model
-    'k': 50,  # fine-tune steps/epochs
-    'fine_tune_batch_size': 32,  # the batch size of the inner-loop optimization
+    'k': 10,  # fine-tune steps/epochs
+    'fine_tune_batch_size': 10,  # the batch size of the inner-loop optimization
     'augmentation_enable': True,
-    'lr_decay': True,
     'optimizer': {
-        'lr': 1e-4,
+        'lr': 1e-4 * 0.1,
         'weight_decay': 1e-6
     }
 }
