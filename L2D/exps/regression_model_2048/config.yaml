@@ -1,0 +1,14 @@
+augment_flip: true
+augment_rotate: true
+dataset_dir: generations/mixed_merge/subproblem_selection_hgs
+device: cuda:1
+fit_subproblem: true
+lr: 0.001
+model_save_dir: exps/regression_model/models
+n_batch: 2048
+n_layers: 6
+n_route_neighbors: 10
+n_step_save: 5000
+solver: HGS
+train_dir: exps/regression_model
+transformer_heads: 8
