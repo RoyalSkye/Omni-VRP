@@ -54,11 +54,12 @@ class TSPTrainer:
             torch.set_default_tensor_type('torch.FloatTensor')
 
         # Main Components
-        # (`no` norm) and (`batch` with fomaml) will destabilize the meta-training, while (batch with maml) is ok;
-        # On the zero-shot setting, `instance` norm and `batch_no_track` are better than `batch` norm;
-        # On the few-shot setting, `batch` norm seems to better than `instance` norm, with a faster adaptation to OOD data.
-        self.model_params["norm"] = 'batch_no_track'
+        self.model_params["norm"] = "rezero"  # instance norm seems to be better than batch norm when dealing with OOD, no norm will destabilize the training
+        self.model_num = 73  # j - batch/instnace: [0, 85] rezero: [0, 73] without: [0, 61]
         self.meta_model = Model(**self.model_params)
+        # print(self.meta_model)
+        self.cos = torch.nn.CosineSimilarity(dim=0, eps=1e-6)
+        self.fomaml_first_cos, self.fomaml_last_cos, self.reptile_first_cos1, self.reptile_last_cos1, self.reptile_first_cos2, self.reptile_last_cos2 = [], [], [], [], [], []
         self.meta_optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.alpha = self.meta_params['alpha']  # for reptile
         self.task_set = generate_task_set(self.meta_params)
@@ -72,7 +73,7 @@ class TSPTrainer:
         elif self.meta_params["data_type"] == "size_distribution":
             # hardcoded - task_set: range(self.min_n, self.max_n, self.task_interval) * self.num_dist
             self.min_n, self.max_n, self.task_interval, self.num_dist = 50, 200, 5, 11
-            self.task_w = torch.full(((self.max_n - self.min_n) // self.task_interval + 1, self.num_dist), 1 / self.num_dist)
+            self.task_w = torch.full(((self.max_n - self.min_n) // 5 + 1, self.num_dist), 1 / self.num_dist)
 
         # Restore
         self.start_epoch = 1
@@ -91,12 +92,15 @@ class TSPTrainer:
 
     def run(self):
 
+        assert self.model_params['meta_update_encoder']
+        assert self.meta_params['B'] == 1 and self.meta_params['k'] == 1 and self.meta_params['L'] == 0
+
         start_time, best_mean = time.time(), 1000
         self.time_estimator.reset(self.start_epoch)
         for epoch in range(self.start_epoch, self.meta_params['epochs']+1):
             self.logger.info('=================================================================')
 
-            # lr decay (by 10) to speed up convergence at 90th iteration
+            # lr decay (by 10) to speed up convergence at 90th and 95th iterations
             if epoch in [int(self.meta_params['epochs'] * 0.9)]:
                 self.optimizer_params['optimizer']['lr'] /= 10
                 for group in self.meta_optimizer.param_groups:
@@ -119,7 +123,7 @@ class TSPTrainer:
                 paths = ["tsp100_uniform.pkl", "tsp100_gaussian.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl", "tsp100_tsplib.pkl"]
             elif self.meta_params["data_type"] == "size_distribution":
                 dir = "../../data/TSP/Size_Distribution/"
-                paths = ["tsp200_uniform.pkl", "tsp300_rotation.pkl"]
+                paths = ["tsp200_uniform.pkl", "tsp200_gaussian.pkl", "tsp300_rotation.pkl"]
             if epoch <= 1 or (epoch % img_save_interval) == 0:
                 for val_path in paths:
                     no_aug_score = self._fast_val(self.meta_model, path=os.path.join(dir, val_path), val_episodes=64, mode="eval")
@@ -175,6 +179,16 @@ class TSPTrainer:
                 # self.logger.info("Now, printing log array...")
                 # util_print_log_array(self.logger, self.result_log)
 
+            if epoch > 0 and epoch % 1000 == 0:
+                torch.save({
+                    'fomaml_first_cos': self.fomaml_first_cos,
+                    'fomaml_last_cos': self.fomaml_last_cos,
+                    'reptile_first_cos1': self.reptile_first_cos1,
+                    'reptile_last_cos1': self.reptile_last_cos1,
+                    'reptile_first_cos2': self.reptile_first_cos2,
+                    'reptile_last_cos2': self.reptile_last_cos2,
+                }, "./grad_dir_cos.pt")
+
     def _train_one_epoch(self, epoch):
         """
         Meta-Learning framework:
@@ -187,141 +201,165 @@ class TSPTrainer:
             for distribution: we compute the relative gaps (w.r.t. LKH3) or estimate the potential improvements of each distribution (i.e., bootstrap) every X iters;
             for size_distribution: combine together.
         """
+
         self.meta_optimizer.zero_grad()
         score_AM, loss_AM = AverageMeter(), AverageMeter()
         meta_batch_size = self.meta_params['meta_batch_size']
 
         # Adaptive task scheduler:
         if self.meta_params['curriculum']:
-            if self.meta_params["data_type"] == "size":
-                # start = self.min_n + int(min(epoch / self.meta_params['sch_epoch'], 1) * (self.max_n - self.min_n))  # linear
-                start = self.min_n + int(1/2 * (1-math.cos(math.pi * min(epoch/self.meta_params['sch_epoch'], 1))) * (self.max_n - self.min_n))  # cosine
-                end = min(start + 10, self.max_n)  # 10 is the size of the sliding window
-                if self.meta_params["curriculum"]: print(">> training task {}".format((start, end)))
-            elif self.meta_params["data_type"] == "distribution":
-                if epoch % self.meta_params['update_weight'] == 0:
-                    self.task_w = self._update_task_weight(self.task_set, self.task_w, epoch)
-            elif self.meta_params["data_type"] == "size_distribution":
+            if self.meta_params["data_type"] == "size_distribution":
                 start = self.min_n + int(min(epoch / self.meta_params['sch_epoch'], 1) * (self.max_n - self.min_n))  # linear
                 # start = self.min_n + int(1 / 2 * (1 - math.cos(math.pi * min(epoch / self.meta_params['sch_epoch'], 1))) * (self.max_n - self.min_n))  # cosine
-                n = start // self.task_interval * self.task_interval
-                idx = (n - self.min_n) // self.task_interval
+                n = start // 5 * 5
+                idx = (n - self.min_n) // 5
                 tasks, weights = self.task_set[idx*11: (idx+1)*11], self.task_w[idx]
                 if epoch % self.meta_params['update_weight'] == 0:
                     self.task_w[idx] = self._update_task_weight(tasks, weights, epoch)
 
         self._alpha_scheduler(epoch)  # for reptile
-        fast_weights, val_loss, meta_grad_dict = [], 0, {(i, j): 0 for i, group in enumerate(self.meta_optimizer.param_groups) for j, _ in enumerate(group['params'])}
-
-        # sample a batch of tasks
-        w, selected_tasks = [1.0] * self.meta_params['B'], []
-        for b in range(self.meta_params['B']):
-            if self.meta_params["data_type"] == "size":
-                task_params = random.sample(range(start, end + 1), 1) if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                batch_size = meta_batch_size if task_params[0] <= 150 else meta_batch_size // 2
-            elif self.meta_params["data_type"] == "distribution":
-                task_params = self.task_set[torch.multinomial(self.task_w, 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                batch_size = meta_batch_size
-            elif self.meta_params["data_type"] == "size_distribution":
-                selected = torch.multinomial(self.task_w[idx], 1).item()
-                task_params = tasks[selected] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
-                batch_size = meta_batch_size if task_params[0] <= 150 else meta_batch_size // 2
-                w[b] = self.task_w[idx][selected].item()
-            selected_tasks.append(task_params)
-        w = torch.softmax(torch.Tensor(w), dim=0)
+        val_loss, meta_grad_dict = 0, {(i, j): 0 for i, group in enumerate(self.meta_optimizer.param_groups) for j, _ in enumerate(group['params'])}
+        fast_weights_1, fast_weights_2, fast_weights_5, fast_weights_10 = [], [], [], []
 
         for b in range(self.meta_params['B']):
-            task_params, task_w = selected_tasks[b], w[b].item()
-            # preparation
-            if self.meta_params['meta_method'] in ['fomaml', 'reptile']:
-                task_model = copy.deepcopy(self.meta_model)
-                optimizer = Optimizer(task_model.parameters(), **self.optimizer_params['optimizer'])
-                # optimizer.load_state_dict(self.meta_optimizer.state_dict())
-            elif self.meta_params['meta_method'] == 'maml':
-                if self.model_params['meta_update_encoder']:
-                    fast_weight = OrderedDict(self.meta_model.named_parameters())
-                else:
-                    fast_weight = OrderedDict(self.meta_model.decoder.named_parameters())
-                    for k in list(fast_weight.keys()):
-                        fast_weight["decoder."+k] = fast_weight.pop(k)
+            # sample a task
+            if self.meta_params["data_type"] == "size_distribution":
+                task_params = tasks[torch.multinomial(self.task_w[idx], 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
+                batch_size = meta_batch_size if (task_params[0] <= 150 and self.meta_params['k'] + self.meta_params['L'] == 1) else meta_batch_size // 2
+            data = self._get_data(batch_size, task_params)
+            val_data = self._get_val_data(batch_size, task_params)
 
-            # inner-loop optimization
-            for step in range(self.meta_params['k']):
-                data = self._get_data(batch_size, task_params)
+            # for fomaml
+            task_model = Model(**self.model_params)
+            task_model.load_state_dict(copy.deepcopy(self.meta_model.state_dict()))
+            # task_model = copy.deepcopy(self.meta_model)
+            optimizer = Optimizer(task_model.parameters(), **self.optimizer_params['optimizer'])
+            optimizer.load_state_dict(self.meta_optimizer.state_dict())
+            # for reptile
+            task_model1 = Model(**self.model_params)
+            task_model1.load_state_dict(copy.deepcopy(self.meta_model.state_dict()))
+            optimizer1 = Optimizer(task_model1.parameters(), **self.optimizer_params['optimizer'])
+            optimizer1.load_state_dict(self.meta_optimizer.state_dict())
+            # for maml
+            fast_weight = OrderedDict(self.meta_model.named_parameters())
+
+            # inner-loop optimization for maml
+            # for reptile: k \in [1, 2, 5, 10]
+            for step in range(2):
                 env_params = {'problem_size': data.size(1), 'pomo_size': data.size(1)}
                 self.meta_model.train()
-                if self.meta_params['meta_method'] in ['reptile', 'fomaml']:
-                    avg_score, avg_loss = self._train_one_batch(task_model, data, Env(**env_params), optimizer)
-                elif self.meta_params['meta_method'] == 'maml':
-                    avg_score, avg_loss, fast_weight = self._train_one_batch_maml(fast_weight, data, Env(**env_params), create_graph=True)
+                if step < 1:
+                    _, _ = self._train_one_batch(task_model, data, Env(**env_params), optimizer)  # for fomaml
+                    _, _ = self._train_one_batch(task_model1, data, Env(**env_params), optimizer1)  # for reptile
+                    avg_score, avg_loss, fast_weight = self._train_one_batch_maml(fast_weight, data, Env(**env_params), create_graph=True)  # for maml
+                else:
+                    data = val_data
+                    avg_score, avg_loss = self._train_one_batch(task_model1, data, Env(**env_params), optimizer1)  # for reptile
+
+                if step == 0:
+                    fast_weights_1.append(task_model1.state_dict())
+                    for i, params_key in enumerate(self.meta_model.state_dict()):
+                        if i == 0:
+                            tmp = torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights_1], dim=0), dim=0)
+                            reptile_first_layer1 = -tmp.sign().cpu().detach().clone()
+                        elif i == self.model_num:
+                            tmp = torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights_1], dim=0), dim=0)
+                            reptile_last_layer1 = -tmp.sign().cpu().detach().clone()
+                elif step == 1:
+                    fast_weights_2.append(task_model1.state_dict())
+                    for i, params_key in enumerate(self.meta_model.state_dict()):
+                        if i == 0:
+                            tmp = torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights_2], dim=0), dim=0)
+                            reptile_first_layer2 = -tmp.sign().cpu().detach().clone()
+                        elif i == self.model_num:
+                            tmp = torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights_2], dim=0), dim=0)
+                            reptile_last_layer2 = -tmp.sign().cpu().detach().clone()
+                # elif step == 4:
+                #     fast_weights_5.append(task_model1.state_dict())
+                #     for i, params_key in enumerate(self.meta_model.state_dict()):
+                #         if i == 0:
+                #             tmp = torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights_5], dim=0), dim=0)
+                #             reptile_first_layer = -tmp.sign().cpu().detach().clone()
+                #         elif i == self.model_num:
+                #             tmp = torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights_5], dim=0), dim=0)
+                #             reptile_last_layer = -tmp.sign().cpu().detach().clone()
+                # elif step == 9:
+                #     fast_weights_10.append(task_model1.state_dict())
+                #     for i, params_key in enumerate(self.meta_model.state_dict()):
+                #         if i == 0:
+                #             tmp = torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights_10], dim=0), dim=0)
+                #             reptile_first_layer = -tmp.sign().cpu().detach().clone()
+                #         elif i == self.model_num:
+                #             tmp = torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights_10], dim=0), dim=0)
+                #             reptile_last_layer = -tmp.sign().cpu().detach().clone()
+
                 score_AM.update(avg_score.item(), batch_size)
                 loss_AM.update(avg_loss.item(), batch_size)
 
-            # bootstrap
-            bootstrap_model = None
-            if self.meta_params['L'] > 0:
-                assert self.meta_params['meta_method'] in ['maml', 'fomaml']
-                bootstrap_model = Model(**self.model_params)
-                if self.meta_params['meta_method'] == 'maml':
-                    bootstrap_model = OrderedDict({k: v.clone().detach().requires_grad_(True) for k, v in fast_weight.items()})
-                else:
-                    bootstrap_model.load_state_dict(copy.deepcopy(task_model.state_dict()))
-                    bootstrap_optimizer = Optimizer(bootstrap_model.parameters(), **self.optimizer_params['optimizer'])
-                    bootstrap_optimizer.load_state_dict(optimizer.state_dict())
-            for step in range(self.meta_params['L']):
-                data = self._get_data(batch_size, task_params)
-                if self.meta_params['meta_method'] == 'maml':
-                    avg_score, avg_loss, bootstrap_model = self._train_one_batch_maml(bootstrap_model, data, Env(**env_params), create_graph=False)
-                else:
-                    avg_score, avg_loss = self._train_one_batch(bootstrap_model, data, Env(**env_params), bootstrap_optimizer)
-
-            val_data = self._get_val_data(batch_size, task_params)
             self.meta_model.train()
-            if self.meta_params['meta_method'] == 'maml':
-                # Old version
-                # val_loss += self._fast_val(fast_weight, data=val_data, mode="maml") / self.meta_params['B']
-                # New version - Save GPU memory
-                val_loss, kl_loss = self._fast_val(fast_weight, data=val_data, mode="maml", bootstrap_model=bootstrap_model)
-                print(val_loss, kl_loss)
-                loss = (self.meta_params['beta'] * val_loss + (1-self.meta_params['beta']) * kl_loss) * task_w
-                self.meta_optimizer.zero_grad()
-                loss.backward()
-                for i, group in enumerate(self.meta_optimizer.param_groups):
-                    for j, p in enumerate(group['params']):
-                        meta_grad_dict[(i, j)] += p.grad
-            elif self.meta_params['meta_method'] == 'fomaml':
-                val_loss, kl_loss = self._fast_val(task_model, data=val_data, mode="fomaml", bootstrap_model=bootstrap_model)
-                print(val_loss, kl_loss)
-                loss = (self.meta_params['beta'] * val_loss + (1-self.meta_params['beta']) * kl_loss) * task_w
-                optimizer.zero_grad()
-                loss.backward()
-                for i, group in enumerate(optimizer.param_groups):
-                    for j, p in enumerate(group['params']):
-                        meta_grad_dict[(i, j)] += p.grad
-            elif self.meta_params['meta_method'] == 'reptile':
-                fast_weights.append(task_model.state_dict())
+            bootstrap_model = None
+
+            # for maml
+            val_loss, kl_loss = self._fast_val(fast_weight, data=val_data, mode="maml", bootstrap_model=bootstrap_model)
+            loss = (self.meta_params['beta'] * val_loss + (1-self.meta_params['beta']) * kl_loss) / self.meta_params['B']
+            self.meta_optimizer.zero_grad()
+            loss.backward()
+            for i, group in enumerate(self.meta_optimizer.param_groups):
+                for j, p in enumerate(group['params']):
+                    meta_grad_dict[(i, j)] += p.grad
+                    if j == 0:
+                        maml_first_layer = p.grad.sign().cpu().detach().clone()
+                    elif j == self.model_num:
+                        maml_last_layer = p.grad.sign().cpu().detach().clone()
+
+            # for fomaml
+            val_loss1, kl_loss1 = self._fast_val(task_model, data=val_data, mode="fomaml", bootstrap_model=bootstrap_model)
+            loss1 = (self.meta_params['beta'] * val_loss1 + (1-self.meta_params['beta']) * kl_loss1) / self.meta_params['B']
+            optimizer.zero_grad()
+            loss1.backward()
+            for i, group in enumerate(optimizer.param_groups):
+                for j, p in enumerate(group['params']):
+                    # meta_grad_dict[(i, j)] += p.grad
+                    if j == 0:
+                        fomaml_first_layer = p.grad.sign().cpu().detach().clone()
+                    elif j == self.model_num:
+                        fomaml_last_layer = p.grad.sign().cpu().detach().clone()
+
+            # for reptile
+            # fast_weights.append(task_model.state_dict())
+            # for i, params_key in enumerate(self.meta_model.state_dict()):
+            #     if i == 0:
+            #         tmp = torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights], dim=0), dim=0)
+            #         reptile_first_layer = -tmp.sign().cpu().detach().clone()
+            #     elif i == self.model_num:
+            #         tmp = torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights], dim=0), dim=0)
+            #         reptile_last_layer = -tmp.sign().cpu().detach().clone()
+
+            # compute cos sim
+            cos1 = self.cos(maml_first_layer.view(-1), fomaml_first_layer.view(-1))
+            cos2 = self.cos(maml_first_layer.view(-1), reptile_first_layer1.view(-1))
+            cos3 = self.cos(maml_last_layer.view(-1), fomaml_last_layer.view(-1))
+            cos4 = self.cos(maml_last_layer.view(-1), reptile_last_layer1.view(-1))
+            cos5 = self.cos(maml_first_layer.view(-1), reptile_first_layer2.view(-1))
+            cos6 = self.cos(maml_last_layer.view(-1), reptile_last_layer2.view(-1))
+            self.fomaml_first_cos.append(cos1.item())
+            self.fomaml_last_cos.append(cos3.item())
+            self.reptile_first_cos1.append(cos2.item())
+            self.reptile_last_cos1.append(cos4.item())
+            self.reptile_first_cos2.append(cos5.item())
+            self.reptile_last_cos2.append(cos6.item())
 
         # outer-loop optimization (update meta-model)
         if self.meta_params['meta_method'] == 'maml':
-            # Old version
-            # self.meta_optimizer.zero_grad()
-            # val_loss.backward()
-            # self.meta_optimizer.step()
-            # New version - Save GPU memory
             self.meta_optimizer.zero_grad()
             for i, group in enumerate(self.meta_optimizer.param_groups):
                 for j, p in enumerate(group['params']):
                     p.grad = meta_grad_dict[(i, j)]
             self.meta_optimizer.step()
-        elif self.meta_params['meta_method'] == 'fomaml':
-            self.meta_optimizer.zero_grad()
-            for i, group in enumerate(self.meta_optimizer.param_groups):
-                for j, p in enumerate(group['params']):
-                    p.grad = meta_grad_dict[(i, j)]
-            self.meta_optimizer.step()
-        elif self.meta_params['meta_method'] == 'reptile':
-            state_dict = {params_key: (self.meta_model.state_dict()[params_key] + self.alpha * torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights], dim=0).float(), dim=0)) for params_key in self.meta_model.state_dict()}
-            self.meta_model.load_state_dict(state_dict)
+        else:
+            raise NotImplementedError
+
+        # state_dict = {params_key: (self.meta_model.state_dict()[params_key] + self.alpha * torch.mean(torch.stack([fast_weight[params_key] - self.meta_model.state_dict()[params_key] for fast_weight in fast_weights], dim=0), dim=0)) for params_key in self.meta_model.state_dict()}
 
         # Log Once, for each epoch
         self.logger.info('Meta Iteration {:3d}: alpha: {:6f}, Score: {:.4f},  Loss: {:.4f}'.format(epoch, self.alpha, score_AM.avg, loss_AM.avg))
@@ -369,6 +407,8 @@ class TSPTrainer:
 
     def _train_one_batch_maml(self, fast_weight, data, env, optimizer=None, create_graph=True):
 
+        # first_layer_grad_dir, last_layer_grad_dir = None, None
+
         batch_size = data.size(0)
         env.load_problems(batch_size, problems=data, aug_factor=1)
         reset_state, _, _ = env.reset()
@@ -403,10 +443,7 @@ class TSPTrainer:
         lr, weight_decay = self.optimizer_params['optimizer']['lr'], self.optimizer_params['optimizer']['weight_decay']
         for i, ((name, param), grad) in enumerate(zip(fast_weight.items(), gradients)):
             if self.meta_optimizer.state_dict()['state'] != {}:
-                # (with batch/instnace norm layer): i \in [0, 85], where encoder \in [0, 79] + decoder \in [80, 85]
-                # (with rezero norm layer): i \in [0, 73], where encoder \in [0, 67] + decoder \in [68, 73]
-                # (without norm layer): i \in [0, 61], where encoder \in [0, 55] + decoder \in [56, 61]
-                i = i if self.model_params['meta_update_encoder'] else i + 80
+                i = i if self.model_params['meta_update_encoder'] else i + 80  # (with norm layer): i \in [0, 85], where encoder \in [0, 79] + decoder \in [80, 85]
                 state = self.meta_optimizer.state_dict()['state'][i]
                 step, exp_avg, exp_avg_sq = state['step'], state['exp_avg'], state['exp_avg_sq']
                 step += 1
@@ -428,6 +465,12 @@ class TSPTrainer:
                 self.meta_optimizer.state_dict()['state'][i]['exp_avg_sq'] = exp_avg_sq.clone().detach()
             else:
                 param = param - lr * grad
+
+            # if i == 0:
+            #     first_layer_grad_dir = grad.sign().cpu().detach().clone()
+            # if i == self.model_num:
+            #     last_layer_grad_dir = grad.sign().cpu().detach().clone()
+
             w_t.append((name, param))
         fast_weight = OrderedDict(w_t)
         """

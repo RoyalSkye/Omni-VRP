@@ -98,7 +98,7 @@ def solve_concorde_log(executable, directory, name, loc, disable_cache=False):
         return None
 
 
-def get_lkh_executable(url="http://www.akira.ruc.dk/~keld/research/LKH-3/LKH-3.0.7.tgz"):
+def get_lkh_executable(url="http://www.akira.ruc.dk/~keld/research/LKH-3/LKH-3.0.8.tgz"):
 
     cwd = os.path.abspath("lkh")
     os.makedirs(cwd, exist_ok=True)

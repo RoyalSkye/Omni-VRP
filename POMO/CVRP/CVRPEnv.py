@@ -101,7 +101,8 @@ class CVRPEnv:
             node_demand = self.saved_node_demand[self.saved_index:self.saved_index+batch_size]
             self.saved_index += batch_size
         else:
-            depot_xy, node_xy, node_demand = get_random_problems(batch_size, self.problem_size, distribution='uniform', problem="cvrp")
+            depot_xy, node_xy, node_demand, capacity = get_random_problems(batch_size, self.problem_size, distribution='uniform', problem="cvrp")
+            node_demand = node_demand / capacity.view(-1, 1)
         self.batch_size = depot_xy.size(0)
 
         if aug_factor > 1:

@@ -12,7 +12,7 @@ sys.path.insert(0, "..")  # for utils
 from utils.functions import check_extension, load_dataset, save_dataset, run_all_in_pool, move_to
 
 
-def get_lkh_executable(url="http://www.akira.ruc.dk/~keld/research/LKH-3/LKH-3.0.7.tgz"):
+def get_lkh_executable(url="http://www.akira.ruc.dk/~keld/research/LKH-3/LKH-3.0.8.tgz"):
 
     cwd = os.path.abspath("lkh")
     os.makedirs(cwd, exist_ok=True)

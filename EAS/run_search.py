@@ -47,7 +47,7 @@ def get_config():
     parser.add_argument('-p_runs', default=1, type=int)  # If batch_size is 1, set this to > 1 to do multiple runs for the instance in parallel
     parser.add_argument('-output_path', default="EAS_results", type=str)
     parser.add_argument('-norm', default="batch_no_track", choices=['instance', 'batch', 'batch_no_track', 'none'], type=str)
-    parser.add_argument('-gpu_id', default=2, type=int)
+    parser.add_argument('-gpu_id', default=0, type=int)
     parser.add_argument('-seed', default=2023, type=int, help="random seed")
 
     # EAS-Emb and EAS-Lay parameters
@@ -247,7 +247,9 @@ def search(run_id, config):
         logging.info(f"Runtime: {runtime}s")
         logging.info("MEM: " + str(cutorch.max_memory_reserved(config.gpu_id) / 1024 / 1024) + "MB")
         logging.info(f"Num. instances: {len(perf)}")
-        print(">> Solving {}, with sol {}".format(config.instances_path, perf))
+        print(">> Solved {}, with sol {}".format(config.instances_path, perf))
+
+    return np.mean(perf)
 
 
 def seed_everything(seed=2022):
@@ -263,4 +265,15 @@ if __name__ == '__main__':
     seed_everything(config.seed)
     if torch.cuda.is_available():
         torch.cuda.set_device(config.gpu_id)
-    search(run_id, config)
+
+    sol_list, path_list = [], []
+    if os.path.isdir(config.instances_path):
+        path_list = [os.path.join(config.instances_path, f) for f in sorted(os.listdir(config.instances_path))]
+    else:
+        path_list = config.instances_path
+
+    for path in path_list:
+        config.instances_path = path
+        sol = search(run_id, config)
+        sol_list.append(sol)
+    print(len(sol_list), sol_list)

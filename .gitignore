@@ -11,12 +11,8 @@ __pycache__/
 
 .idea/
 
-# data & pretrain-model
-backup/
-data/
-pretrained/
-
 # private files
-utils_plot*
-imgs/
 1.md
+backup/
+all_data/
+pretrained/
