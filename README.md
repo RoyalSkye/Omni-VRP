@@ -14,7 +14,7 @@ This paper studies a challenging yet realistic setting, which considers generali
 
 ### TODO
 
-- [ ] Finish Dependencies & How to Run.
+- [ ] Finish Dependencies & How to Run & Take-home Messages.
 - [ ] Camera-ready.
 - [ ] Slide and Poster.
 - [ ] Release Review.
@@ -24,6 +24,10 @@ This paper studies a challenging yet realistic setting, which considers generali
 
 
 ### How to Run
+
+
+
+### Take-home Messages
 
 
 
@@ -38,6 +42,7 @@ Thank the following repositories, which are baselines of our code:
 * https://github.com/wouterkool/attention-learn-to-route
 * https://github.com/yd-kwon/POMO
 * https://github.com/mit-wu-lab/learning-to-delegate
+* "On the generalization of neural combinatorial optimization heuristics"
 
 ### Citation
 

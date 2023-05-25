@@ -34,6 +34,7 @@ class TSPTrainer:
         self.optimizer_params = optimizer_params
         self.trainer_params = trainer_params
         self.meta_params = meta_params
+        assert self.meta_params['data_type'] == "size_distribution", "Not supported, need to modify the code!"
 
         # result folder, logger
         self.logger = getLogger(name='trainer')
@@ -57,7 +58,6 @@ class TSPTrainer:
         self.optimizer = Optimizer(self.model.parameters(), **self.optimizer_params['optimizer'])
         self.task_set = generate_task_set(self.meta_params)
         self.val_data, self.val_opt = {}, {}  # for lkh3_offline
-        assert not (self.meta_params['curriculum'] and self.meta_params["data_type"] in ["size", "distribution"]), "Not Implemented!"
         if self.meta_params["data_type"] == "size_distribution":
             # hardcoded - task_set: range(self.min_n, self.max_n, self.task_interval) * self.num_dist
             self.min_n, self.max_n, self.task_interval, self.num_dist = 50, 200, 5, 11
@@ -66,6 +66,7 @@ class TSPTrainer:
         # Restore
         self.start_epoch = 1
         model_load = trainer_params['model_load']
+        pretrain_load = trainer_params['pretrain_load']
         if model_load['enable']:
             checkpoint_fullname = '{path}/checkpoint-{epoch}.pt'.format(**model_load)
             checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
@@ -73,7 +74,14 @@ class TSPTrainer:
             self.start_epoch = 1 + model_load['epoch']
             self.result_log.set_raw_data(checkpoint['result_log'])
             self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.logger.info('Saved Model Loaded !!')
+            self.logger.info('Checkpoint loaded successfully from {}'.format(checkpoint_fullname))
+
+        elif pretrain_load['enable']:  # meta-training on a pretrain model
+            self.logger.info(">> Loading pretrained model: be careful with the type of the normalization layer!")
+            checkpoint_fullname = '{path}'.format(**pretrain_load)
+            checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.logger.info('Pretrained model loaded successfully from {}'.format(checkpoint_fullname))
 
         # utility
         self.time_estimator = TimeEstimator()
@@ -85,11 +93,11 @@ class TSPTrainer:
             self.logger.info('=================================================================')
 
             # lr decay (by 10) to speed up convergence at 90th iteration
-            # if epoch in [int(self.meta_params['epochs'] * 0.9)]:
-            #     self.optimizer_params['optimizer']['lr'] /= 10
-            #     for group in self.optimizer.param_groups:
-            #         group["lr"] /= 10
-            #         print(">> LR decay to {}".format(group["lr"]))
+            if epoch in [int(self.meta_params['epochs'] * 0.9)]:
+                self.optimizer_params['optimizer']['lr'] /= 10
+                for group in self.optimizer.param_groups:
+                    group["lr"] /= 10
+                    print(">> LR decay to {}".format(group["lr"]))
 
             # Train
             train_score, train_loss = self._train_one_epoch(epoch)
@@ -99,13 +107,7 @@ class TSPTrainer:
             img_save_interval = self.trainer_params['logging']['img_save_interval']
             # Val
             no_aug_score_list = []
-            if self.meta_params["data_type"] == "size":
-                dir = "../../data/TSP/Size/"
-                paths = ["tsp100_uniform.pkl", "tsp200_uniform.pkl", "tsp300_uniform.pkl"]
-            elif self.meta_params["data_type"] == "distribution":
-                dir = "../../data/TSP/Distribution/"
-                paths = ["tsp100_uniform.pkl", "tsp100_gaussian.pkl", "tsp100_cluster.pkl", "tsp100_diagonal.pkl", "tsp100_tsplib.pkl"]
-            elif self.meta_params["data_type"] == "size_distribution":
+            if self.meta_params["data_type"] == "size_distribution":
                 dir = "../../data/TSP/Size_Distribution/"
                 paths = ["tsp200_uniform.pkl", "tsp300_rotation.pkl"]
             if epoch <= 1 or (epoch % img_save_interval) == 0:
@@ -139,12 +141,6 @@ class TSPTrainer:
                 }
                 torch.save(checkpoint_dict, '{}/checkpoint-{}.pt'.format(self.result_folder, epoch))
 
-            # if all_done or (epoch % img_save_interval) == 0:
-            #     image_prefix = '{}/img/checkpoint-{}'.format(self.result_folder, epoch)
-            #     util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'], self.result_log, labels=['train_score'])
-            #     util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_1'], self.result_log, labels=['val_score'])
-            #     util_save_log_image_with_label(image_prefix, self.trainer_params['logging']['log_image_params_2'], self.result_log, labels=['train_loss'])
-
             if all_done:
                 self.logger.info(" *** Training Done *** ")
                 # self.logger.info("Now, printing log array...")
@@ -172,12 +168,7 @@ class TSPTrainer:
         # sample a batch of tasks
         for b in range(self.meta_params['B']):
             for step in range(self.meta_params['k']):
-                if self.meta_params["data_type"] == "size":
-                    task_params = random.sample(self.task_set, 1)[0]
-                    batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 150 else self.meta_params['meta_batch_size'] // 2
-                elif self.meta_params["data_type"] == "distribution":
-                    task_params = random.sample(self.task_set, 1)[0]
-                elif self.meta_params["data_type"] == "size_distribution":
+                if self.meta_params["data_type"] == "size_distribution":
                     task_params = tasks[torch.multinomial(self.task_w[idx], 1).item()] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
                     batch_size = self.meta_params['meta_batch_size'] if task_params[0] <= 150 else self.meta_params['meta_batch_size'] // 2
 
@@ -262,7 +253,6 @@ class TSPTrainer:
             return no_aug_score.detach().item()
 
     def _get_data(self, batch_size, task_params):
-
         if self.meta_params['data_type'] == 'distribution':
             assert len(task_params) == 2
             data = get_random_problems(batch_size, self.env_params['problem_size'], num_modes=task_params[0], cdist=task_params[1], distribution='gaussian_mixture', problem="tsp")
@@ -274,50 +264,6 @@ class TSPTrainer:
             data = get_random_problems(batch_size, task_params[0], num_modes=task_params[1], cdist=task_params[2], distribution='gaussian_mixture', problem="tsp")
         else:
             raise NotImplementedError
-
-        return data
-
-    def _generate_x_adv(self, data, eps=10.0):
-        """
-        Generate adversarial data based on the current model, also need to generate optimal sol for x_adv.
-        """
-        from torch.autograd import Variable
-        def minmax(xy_):
-            # min_max normalization: [b,n,2]
-            xy_ = (xy_ - xy_.min(dim=1, keepdims=True)[0]) / (xy_.max(dim=1, keepdims=True)[0] - xy_.min(dim=1, keepdims=True)[0])
-            return xy_
-
-        if eps == 0: return data
-        # generate x_adv
-        self.model.eval()
-        aug_factor, batch_size = 1, data.size(0)
-        env = Env(**{'problem_size': data.size(1), 'pomo_size': data.size(1)})
-        with torch.enable_grad():
-            data.requires_grad_()
-            env.load_problems(batch_size, problems=data, aug_factor=aug_factor)
-            reset_state, _, _ = env.reset()
-            self.model.pre_forward(reset_state)
-            prob_list = torch.zeros(size=(aug_factor * batch_size, env.pomo_size, 0))
-            state, reward, done = env.pre_step()
-            while not done:
-                selected, prob = self.model(state)
-                state, reward, done = env.step(selected)
-                prob_list = torch.cat((prob_list, prob[:, :, None]), dim=2)
-
-            aug_reward = reward.reshape(aug_factor, batch_size, env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
-            baseline_reward = aug_reward.float().mean(dim=1, keepdims=True)
-            advantage = aug_reward - baseline_reward
-            log_prob = prob_list.log().sum(dim=2).reshape(aug_factor, batch_size, env.pomo_size).permute(1, 0, 2).view(batch_size, -1)
-
-            # delta = torch.autograd.grad(eps * ((advantage / baseline_reward) * log_prob).mean(), data)[0]
-            delta = torch.autograd.grad(eps * ((-advantage) * log_prob).mean(), data)[0]
-            data = data.detach() + delta
-            data = minmax(data)
-            data = Variable(data, requires_grad=False)
-
-        # generate opt sol
-        # opt_sol = solve_all_gurobi(data)
-        # return data, opt_sol
 
         return data
 

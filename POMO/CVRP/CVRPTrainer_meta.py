@@ -18,7 +18,7 @@ from CVRP_baseline import *
 
 class CVRPTrainer:
     """
-    Implementation of POMO with MAML / FOMAML / Reptile on CVRP.
+    Implementation of POMO with MAML / FOMAML / Reptile / Bootstrap Meta-learning on CVRP.
     For MAML & FOMAML, ref to "Model-Agnostic Meta-Learning for Fast Adaptation of Deep Networks";
     For Reptile, ref to "On First-Order Meta-Learning Algorithms" and "On the generalization of neural combinatorial optimization heuristics".
     """
@@ -35,6 +35,7 @@ class CVRPTrainer:
         self.optimizer_params = optimizer_params
         self.trainer_params = trainer_params
         self.meta_params = meta_params
+        assert self.meta_params['data_type'] == "size_distribution", "Not supported, need to modify the code!"
 
         # result folder, logger
         self.logger = getLogger(name='trainer')
@@ -62,7 +63,6 @@ class CVRPTrainer:
         self.alpha = self.meta_params['alpha']  # for reptile
         self.task_set = generate_task_set(self.meta_params)
         self.val_data, self.val_opt = {}, {}  # for lkh3_offline
-        assert not (self.meta_params['curriculum'] and self.meta_params["data_type"] in ["size", "distribution"]), "Not Implemented!"
         if self.meta_params["data_type"] == "size_distribution":
             # hardcoded - task_set: range(self.min_n, self.max_n, self.task_interval) * self.num_dist
             self.min_n, self.max_n, self.task_interval, self.num_dist = 50, 200, 5, 11
@@ -71,6 +71,7 @@ class CVRPTrainer:
         # Restore
         self.start_epoch = 1
         model_load = trainer_params['model_load']
+        pretrain_load = trainer_params['pretrain_load']
         if model_load['enable']:
             checkpoint_fullname = '{path}/checkpoint-{epoch}.pt'.format(**model_load)
             checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
@@ -78,7 +79,14 @@ class CVRPTrainer:
             self.start_epoch = 1 + model_load['epoch']
             self.result_log.set_raw_data(checkpoint['result_log'])
             self.meta_optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
-            self.logger.info(">> Model loaded from {}".format(checkpoint_fullname))
+            self.logger.info('Checkpoint loaded successfully from {}'.format(checkpoint_fullname))
+
+        elif pretrain_load['enable']:  # meta-training on a pretrain model
+            self.logger.info(">> Loading pretrained model: be careful with the type of the normalization layer!")
+            checkpoint_fullname = '{path}'.format(**pretrain_load)
+            checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
+            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.logger.info('Pretrained model loaded successfully from {}'.format(checkpoint_fullname))
 
         # utility
         self.time_estimator = TimeEstimator()
@@ -105,13 +113,7 @@ class CVRPTrainer:
             img_save_interval = self.trainer_params['logging']['img_save_interval']
             # Val
             no_aug_score_list = []
-            if self.meta_params["data_type"] == "size":
-                dir = "../../data/CVRP/Size/"
-                paths = ["cvrp100_uniform.pkl", "cvrp200_uniform.pkl", "cvrp300_uniform.pkl"]
-            elif self.meta_params["data_type"] == "distribution":
-                dir = "../../data/CVRP/Distribution/"
-                paths = ["cvrp100_uniform.pkl", "cvrp100_gaussian.pkl", "cvrp100_cluster.pkl", "cvrp100_diagonal.pkl", "cvrp100_cvrplib.pkl"]
-            elif self.meta_params["data_type"] == "size_distribution":
+            if self.meta_params["data_type"] == "size_distribution":
                 dir = "../../data/CVRP/Size_Distribution/"
                 paths = ["cvrp200_uniform.pkl", "cvrp300_rotation.pkl"]
             if epoch <= 1 or (epoch % img_save_interval) == 0:
@@ -196,13 +198,7 @@ class CVRPTrainer:
         # sample a batch of tasks
         w, selected_tasks = [1.0] * self.meta_params['B'], []
         for b in range(self.meta_params['B']):
-            if self.meta_params["data_type"] == "size":
-                task_params = random.sample(self.task_set, 1)[0]
-                batch_size = meta_batch_size if task_params[0] <= 150 else meta_batch_size // 2
-            elif self.meta_params["data_type"] == "distribution":
-                task_params = random.sample(self.task_set, 1)[0]
-                batch_size = meta_batch_size
-            elif self.meta_params["data_type"] == "size_distribution":
+            if self.meta_params["data_type"] == "size_distribution":
                 selected = torch.multinomial(self.task_w[idx], 1).item()
                 task_params = tasks[selected] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
                 batch_size = meta_batch_size if task_params[0] <= 150 else meta_batch_size // 2
@@ -525,9 +521,6 @@ class CVRPTrainer:
 
     def _get_val_data(self, batch_size, task_params):
         if self.meta_params["data_type"] == "size":
-            # start1, end1 = min(task_params[0] + 10, self.max_n), min(task_params[0] + 20, self.max_n)
-            # val_size = random.sample(range(start1, end1 + 1), 1)[0]
-            # val_data = self._get_data(batch_size, (val_size,))
             val_data = self._get_data(batch_size, task_params)
         elif self.meta_params["data_type"] == "distribution":
             val_data = self._get_data(batch_size, task_params)

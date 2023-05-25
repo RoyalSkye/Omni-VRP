@@ -30,7 +30,6 @@ model_params = {
     'ff_hidden_dim': 512,
     'eval_type': 'argmax',
     'meta_update_encoder': True,
-    # 'norm': 'batch_no_track'
 }
 
 optimizer_params = {
@@ -57,11 +56,16 @@ trainer_params = {
             'filename': 'style_loss_1.json'
         },
     },
+    # load previous checkpoint for meta-training
     'model_load': {
         'enable': False,  # enable loading pre-trained model
         'path': './result/saved_CVRP20_model',  # directory path of pre-trained model and log files saved.
         'epoch': 2000,  # epoch version of pre-trained model to laod.
-
+    },
+    # load pretrain model for meta-training instead of meta-training from scratch
+    'pretrain_load': {
+        'enable': False,
+        'path': '../../pretrained/POMO-CVRP/checkpoint-30500-cvrp100-instance-norm.pt',  # be careful with the type of the normalization layer
     }
 }
 
