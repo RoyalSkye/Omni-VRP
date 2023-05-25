@@ -12,7 +12,6 @@ __pycache__/
 .idea/
 
 # private files
-1.md
 backup/
-all_data/
-pretrained/
+our_data/
+our_pretrained/
