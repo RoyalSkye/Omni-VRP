@@ -9,7 +9,11 @@
 
 #### 1. Meta-learning implementation: 
 
-Please ref to supervised_maml.py
+Please ref to `supervised_maml.py`
+
+*Note: we do not implement the task scheduler since the data generation process in L2D is not flexible as POMO.*
+
+*Note: based on our exps, the training of the first-order approximation is not stable in L2D. Nevertheless, unlike POMO, the second-order one for L2D is computationally efficient.*
 
 #### 2. How to run? 
 

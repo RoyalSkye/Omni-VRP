@@ -571,7 +571,7 @@ def train(args, d, d_eval, d_generate):
         if step % args.n_step_generate == 0 and (step > 0 or args.generate_step_zero):
             generate(args, d_generate, net, step)
         if step == args.n_steps: break
-        if step > 10000:  # simple curriculm learning strategy 
+        if step > 10000:  # simple curriculm learning strategy, note: could simply use random task scheduler instead,
             start, end = 75000, d.N
 
         opt.zero_grad()
