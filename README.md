@@ -28,14 +28,14 @@ conda install pytz tqdm scikit-learn matplotlib
 We take the meta-training on POMO as an example. See [here](https://github.com/RoyalSkye/Omni-VRP/tree/main/L2D) for L2D.
 
 ```shell
-# 1. training
+# 1. Training
 # a. second-order
 nohup python -u train.py 2>&1 &
 # b. early-stopping
 meta_params['meta_method'] = "maml_fomaml"
 # c. first-order
 meta_params['meta_method'] = "fomaml"
-# 2. testing
+# 2. Testing
 # a. zero-shot on datasets (.pkl)
 nohup python -u test.py 2>&1 &
 # b. few-shot on datasets (.pkl), including 1K test instances and 1K fine-tuning instances.
