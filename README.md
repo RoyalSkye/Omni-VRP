@@ -36,9 +36,9 @@ meta_params['meta_method'] = "maml_fomaml"
 # c. first-order
 meta_params['meta_method'] = "fomaml"
 # 2. testing
-# a. zero-shot on datasets (.pkl), including 1K test instances and 1K fine-tuning instances.
+# a. zero-shot on datasets (.pkl)
 nohup python -u test.py 2>&1 &
-# b. few-shot on datasets (.pkl)
+# b. few-shot on datasets (.pkl), including 1K test instances and 1K fine-tuning instances.
 fine_tune_params['enable'] = True
 # c. zero-shot on benchmark instances (.tsp or .vrp)
 tester_params['test_set_path'] = "../../data/TSP/tsplib"
@@ -74,7 +74,7 @@ meta_params['reptile'] = 'reptile'  # Meta-POMO
 
 ### Discussions
 
-In summary: 1) Normalization layers matter in AM-based models (see [here](https://github.com/RoyalSkye/Omni-VRP/blob/main/POMO/TSP/TSPTrainer_Meta.py#L58)); 2) The training efficiency and scalability heavily depend on the base model and meta-learning algorithm; 3) It may be better to conduct meta-training on the pretrained model. For further discussions, refer to Appendix E.
+In summary: 1) Normalization layers matter in AM-based models (see [here](https://github.com/RoyalSkye/Omni-VRP/blob/main/POMO/TSP/TSPTrainer_meta.py#L58)); 2) The training efficiency and scalability heavily depend on the base model and meta-learning algorithm; 3) It may be better to conduct meta-training on the pretrained model. For further discussions, refer to Appendix E.
 
 ### Acknowledgments
 
