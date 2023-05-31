@@ -87,7 +87,8 @@ class TSPTrainer:
             self.logger.info(">> Loading pretrained model: be careful with the type of the normalization layer!")
             checkpoint_fullname = '{path}'.format(**pretrain_load)
             checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
-            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.meta_model.load_state_dict(checkpoint['model_state_dict'])
+            self.meta_optimizer.load_state_dict(checkpoint['optimizer_state_dict'])  # otherwise, unstable meta-training (nan problem)
             self.logger.info('Pretrained model loaded successfully from {}'.format(checkpoint_fullname))
 
         # utility

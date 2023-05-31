@@ -86,7 +86,8 @@ class CVRPTrainer:
             self.logger.info(">> Loading pretrained model: be careful with the type of the normalization layer!")
             checkpoint_fullname = '{path}'.format(**pretrain_load)
             checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
-            self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.meta_model.load_state_dict(checkpoint['model_state_dict'])
+            self.meta_optimizer.load_state_dict(checkpoint['optimizer_state_dict'])  # otherwise, unstable meta-training (nan problem)
             self.logger.info('Pretrained model loaded successfully from {}'.format(checkpoint_fullname))
 
         # utility
@@ -372,7 +373,7 @@ class CVRPTrainer:
         w_t, (beta1, beta2), eps = [], self.meta_optimizer.param_groups[0]['betas'], self.meta_optimizer.param_groups[0]['eps']
         lr, weight_decay = self.optimizer_params['optimizer']['lr'], self.optimizer_params['optimizer']['weight_decay']
         for i, ((name, param), grad) in enumerate(zip(fast_weight.items(), gradients)):
-            print(i, name)
+            # print(i, name)
             if self.meta_optimizer.state_dict()['state'] != {}:
                 # (with batch/instance norm layer): i \in [0, 86], where encoder \in [0, 81] + decoder \in [82, 86]
                 # (with rezero norm layer): i \in [0, 74], where encoder \in [0, 69] + decoder \in [70, 74]

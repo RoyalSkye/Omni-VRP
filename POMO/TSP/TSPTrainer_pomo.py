@@ -81,6 +81,7 @@ class TSPTrainer:
             checkpoint_fullname = '{path}'.format(**pretrain_load)
             checkpoint = torch.load(checkpoint_fullname, map_location=self.device)
             self.model.load_state_dict(checkpoint['model_state_dict'])
+            self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
             self.logger.info('Pretrained model loaded successfully from {}'.format(checkpoint_fullname))
 
         # utility

@@ -108,7 +108,7 @@ def main():
     if not meta_params['enable']:
         print(">> Start CVRP-POMO Training.")
         trainer = Trainer_pomo(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params, meta_params=meta_params)
-    elif meta_params['meta_method'] in ['maml', 'fomaml', 'reptile']:
+    elif meta_params['meta_method'] in ['maml', 'fomaml', 'maml_fomaml', 'reptile']:
         print(">> Start CVRP-POMO-{} Training.".format(meta_params['meta_method']))
         trainer = Trainer_meta(env_params=env_params, model_params=model_params, optimizer_params=optimizer_params, trainer_params=trainer_params, meta_params=meta_params)
     else:
