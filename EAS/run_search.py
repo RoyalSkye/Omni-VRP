@@ -34,7 +34,7 @@ def get_config():
 
     parser.add_argument('-problem', default="TSP", type=str, choices=['TSP', 'CVRP'])
     parser.add_argument('-method', default="eas-emb", type=str, choices=['eas-emb', 'eas-lay', 'eas-tab'], help="EAS method")
-    parser.add_argument('-model_path', default="../pretrained/pomo_pretrained/checkpoint-30500.pt", type=str, help="Path of the trained model weights")
+    parser.add_argument('-model_path', default="../pretrained/POMO-TSP/checkpoint-3000-tsp100-instance-norm.pt", type=str, help="Path of the trained model weights")
     parser.add_argument('-instances_path', default="../data/TSP/Size_Distribution/tsp200_rotation.pkl", type=str, help="Path of the instances")
     parser.add_argument('-sol_path', default="../data/TSP/Size_Distribution/concorde/tsp200_rotationoffset0n1000-concorde.pkl", type=str, help="Path of the optimal sol")
     parser.add_argument('-num_instances', default=1000, type=int, help="Maximum number of instances that should be solved")
@@ -46,7 +46,7 @@ def get_config():
     parser.add_argument('-batch_size', default=150, type=int)  # Set to 1 for single instance search
     parser.add_argument('-p_runs', default=1, type=int)  # If batch_size is 1, set this to > 1 to do multiple runs for the instance in parallel
     parser.add_argument('-output_path', default="EAS_results", type=str)
-    parser.add_argument('-norm', default="batch_no_track", choices=['instance', 'batch', 'batch_no_track', 'none'], type=str)
+    parser.add_argument('-norm', default="instance", choices=['instance', 'batch', 'batch_no_track', 'none'], type=str)
     parser.add_argument('-gpu_id', default=0, type=int)
     parser.add_argument('-seed', default=2023, type=int, help="random seed")
 

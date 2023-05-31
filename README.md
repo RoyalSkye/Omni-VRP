@@ -12,37 +12,84 @@ The PyTorch Implementation of *ICML 2023 Poster -- "Towards Omni-generalizable N
 
 This paper studies a challenging yet realistic setting, which considers generalization across both size and distribution (a.k.a. omni-generalization) of neural methods in VRPs. Technically, a general meta-learning framework is developed to tackle it.
 
-### TODO
+### Env Setup
 
-- [ ] Finish Dependencies & How to Run & Take-home Messages.
-- [ ] Camera-ready.
-- [ ] Slide and Poster.
-- [ ] Release Review.
-
-### Dependencies
-
-
+```shell
+conda create -n omni_vrp python=3.8
+conda activate omni_vrp
+# install pytorch (we use V.1.12.1), see here: https://pytorch.org/get-started/previous-versions
+conda install pytorch==1.12.1 torchvision==0.13.1 torchaudio==0.12.1 cudatoolkit=11.3 -c pytorch
+conda install pytz tqdm scikit-learn matplotlib
+# for L2D env setup, see here: https://github.com/mit-wu-lab/learning-to-delegate
+```
 
 ### How to Run
 
+We take the meta-training on POMO as an example. See [here](https://github.com/RoyalSkye/Omni-VRP/tree/main/L2D) for L2D.
 
+```shell
+# 1. training
+# a. second-order
+nohup python -u train.py 2>&1 &
+# b. early-stopping
+meta_params['meta_method'] = "maml_fomaml"
+# c. first-order
+meta_params['meta_method'] = "fomaml"
+# 2. testing
+# a. zero-shot on datasets (.pkl), including 1K test instances and 1K fine-tuning instances.
+nohup python -u test.py 2>&1 &
+# b. few-shot on datasets (.pkl)
+fine_tune_params['enable'] = True
+# c. zero-shot on benchmark instances (.tsp or .vrp)
+tester_params['test_set_path'] = "../../data/TSP/tsplib"
+# 3. Traditional VRP solvers ["concorde","lkh"] for TSP; ["hgs", "lkh"] for CVRP
+nohup python -u TSP_baseline.py --method "lkh" --cpus 32 --no_cuda --disable_cache 2>&1 &
+# 4. EAS
+# Note: change -instances_path to the folder path if conducting EAS on benchmark instances
+# Note: Pls carefully check parameters, e.g., -norm, -round_distances, etc.
+nohup python -u run_search.py 2>&1 &
+```
 
-### Take-home Messages
+#### Options
 
+```shell
+# Modify the default value in train.py
+# 1. Bootstrapped Meta-Learning - ICLR 2022
+meta_params['L'] = X (X > 0)
+# 2. ANIL (Almost No Inner Loop) - ICLR 2020
+model_params["meta_update_encoder"] = False
+# 3. Meta-training on the pretrained model
+# Note: The type of normalization layers should match (search for model_params["norm"])
+# Supported normalization layers: ["no", "batch", "batch_no_track", "instance", "rezero"]
+trainer_params['pretrain_load'] = True
+# 4. Resume meta-training 
+trainer_params['model_load'] = True
+# 5. No task scheduler
+meta_params['curriculum'] = False
+# 6. Baselines
+# Note: For AMDKD-POMO, refer to: https://github.com/jieyibi/AMDKD
+meta_params['enable'] = False  # POMO
+meta_params['reptile'] = 'reptile'  # Meta-POMO
+```
 
+### Discussions
 
-### Reviews
-
-We would like to thank the anonymous reviewers and (S)ACs of ICML 2023 for their constructive comments and recommendation. We will share the reviews later.
+In summary: 1) Normalization layers matter in AM-based models (see [here](https://github.com/RoyalSkye/Omni-VRP/blob/main/POMO/TSP/TSPTrainer_Meta.py#L58)); 2) The training efficiency and scalability heavily depend on the base model and meta-learning algorithm; 3) It may be better to conduct meta-training on the pretrained model. For further discussions, refer to Appendix E.
 
 ### Acknowledgments
 
-Thank the following repositories, which are baselines of our code:
+* We would like to thank the anonymous reviewers and (S)ACs of ICML 2023 for their constructive comments and dedicated service to the community. The reviews and meta-review are available [here](https://github.com/RoyalSkye/Omni-VRP/blob/main/Reviews_ICML23.md).
 
-* https://github.com/wouterkool/attention-learn-to-route
-* https://github.com/yd-kwon/POMO
-* https://github.com/mit-wu-lab/learning-to-delegate
-* "On the generalization of neural combinatorial optimization heuristics"
+* We also would like to thank the following repositories, which are baselines of our code:
+
+  * https://github.com/wouterkool/attention-learn-to-route
+
+  * https://github.com/yd-kwon/POMO
+
+  * https://github.com/mit-wu-lab/learning-to-delegate
+
+  * "On the generalization of neural combinatorial optimization heuristics"
+
 
 ### Citation
 

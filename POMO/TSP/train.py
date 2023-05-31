@@ -72,9 +72,10 @@ trainer_params = {
 meta_params = {
     'enable': True,  # whether use meta-learning or not
     'curriculum': True,  # adaptive sample task
-    'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'reptile']
+    'meta_method': 'maml',  # choose from ['maml', 'fomaml', 'maml_fomaml', 'reptile']
     'data_type': 'size_distribution',  # choose from ["size", "distribution", "size_distribution"]
     'epochs': 250000,  # the number of meta-model updates: (250*100000) / (1*5*64)
+    'early_stop_epoch': 50000,  # switch from maml to fomaml
     'B': 1,  # the number of tasks in a mini-batch
     'k': 1,  # gradient decent steps in the inner-loop optimization of meta-learning method
     'L': 0,  # bootstrap steps

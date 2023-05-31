@@ -62,6 +62,7 @@ class TSPTrainer:
         self.meta_model = Model(**self.model_params)
         self.meta_optimizer = Optimizer(self.meta_model.parameters(), **self.optimizer_params['optimizer'])
         self.alpha = self.meta_params['alpha']  # for reptile
+        self.early_stop = True if self.meta_params['meta_method'] == 'maml_fomaml' else False
         self.task_set = generate_task_set(self.meta_params)
         self.val_data, self.val_opt = {}, {}  # for lkh3_offline
         if self.meta_params["data_type"] == "size_distribution":
@@ -181,6 +182,7 @@ class TSPTrainer:
         self.meta_optimizer.zero_grad()
         score_AM, loss_AM = AverageMeter(), AverageMeter()
         meta_batch_size = self.meta_params['meta_batch_size']
+        self.meta_params['meta_method'] = 'fomaml' if self.early_stop and epoch > self.meta_params['early_stop_epoch'] else "maml"
 
         # Adaptive task scheduler:
         if self.meta_params['curriculum']:
@@ -213,7 +215,7 @@ class TSPTrainer:
             if self.meta_params['meta_method'] in ['fomaml', 'reptile']:
                 task_model = copy.deepcopy(self.meta_model)
                 optimizer = Optimizer(task_model.parameters(), **self.optimizer_params['optimizer'])
-                # optimizer.load_state_dict(self.meta_optimizer.state_dict())
+                # optimizer.load_state_dict(self.meta_optimizer.state_dict())  # may cause unstable meta-training for fomaml
             elif self.meta_params['meta_method'] == 'maml':
                 if self.model_params['meta_update_encoder']:
                     fast_weight = OrderedDict(self.meta_model.named_parameters())
