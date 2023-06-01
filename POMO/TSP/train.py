@@ -79,7 +79,7 @@ meta_params = {
     'B': 1,  # the number of tasks in a mini-batch
     'k': 1,  # gradient decent steps in the inner-loop optimization of meta-learning method
     'L': 0,  # bootstrap steps
-    'meta_batch_size': 64,  # will be divided by 2 if problem_size >= 100
+    'meta_batch_size': 64,  # will be divided by 2 if problem_size >= 150
     'update_weight': 100,  # update weight of each task per X iters
     'sch_epoch': 225000,  # for the task scheduler of size setting, where sch_epoch = 0.9 * epochs
     'solver': 'lkh3_offline',  # solver used to update the task weights, choose from ["bootstrap", "lkh3_online", "lkh3_offline", "best_model"]

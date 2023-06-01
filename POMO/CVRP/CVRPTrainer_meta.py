@@ -182,7 +182,11 @@ class CVRPTrainer:
         self.meta_optimizer.zero_grad()
         score_AM, loss_AM = AverageMeter(), AverageMeter()
         meta_batch_size = self.meta_params['meta_batch_size']
-        self.meta_params['meta_method'] = 'fomaml' if self.early_stop and epoch > self.meta_params['early_stop_epoch'] else "maml"
+        if self.early_stop:
+            if epoch > self.meta_params['early_stop_epoch']:
+                self.meta_params['meta_method'] = 'fomaml'
+            else:
+                self.meta_params['meta_method'] = 'maml'
 
         # Adaptive task scheduler - Not implemented for "size" and "distribution"
         if self.meta_params['curriculum']:
@@ -202,10 +206,13 @@ class CVRPTrainer:
         w, selected_tasks = [1.0] * self.meta_params['B'], []
         for b in range(self.meta_params['B']):
             if self.meta_params["data_type"] == "size_distribution":
-                selected = torch.multinomial(self.task_w[idx], 1).item()
-                task_params = tasks[selected] if self.meta_params['curriculum'] else random.sample(self.task_set, 1)[0]
+                if self.meta_params['curriculum']:
+                    selected = torch.multinomial(self.task_w[idx], 1).item()
+                    task_params = tasks[selected]
+                    w[b] = self.task_w[idx][selected].item()
+                else:
+                    task_params = random.sample(self.task_set, 1)[0]
                 batch_size = meta_batch_size if task_params[0] <= 150 else meta_batch_size // 2
-                w[b] = self.task_w[idx][selected].item()
             selected_tasks.append(task_params)
         w = torch.softmax(torch.Tensor(w), dim=0)
 
