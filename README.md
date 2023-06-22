@@ -1,7 +1,7 @@
 <h1 align="center"> Towards Omni-generalizable Neural Methods for Vehicle Routing Problems </h1>
 
 <p align="center">
-      <a href="https://openreview.net/forum?id=PlFBOnVOFg"><img src="https://img.shields.io/badge/OpenReview-PDF-brightgreen" alt="Paper"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://icml.cc/Conferences/2023"><img alt="License" src="https://img.shields.io/static/v1?label=ICML'23&message=Hawaii&color=9cf"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://hits.seeyoufarm.com"><img src="https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2FRoyalSkye%2FOmni-VRP&count_bg=%233DC4C8&title_bg=%23555555&icon=github.svg&icon_color=%23E7E7E7&title=stats&edge_flat=false"/></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://github.com/RoyalSkye/Omni-VRP/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-orange" alt="Paper"></a>
+      <a href="https://openreview.net/forum?id=PlFBOnVOFg"><img src="https://img.shields.io/badge/OpenReview-PDF-brightgreen" alt="Paper"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://icml.cc/virtual/2023/poster/25267"><img alt="License" src="https://img.shields.io/static/v1?label=ICML'23&message=Hawaii&color=9cf"></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://hits.seeyoufarm.com"><img src="https://hits.seeyoufarm.com/api/count/incr/badge.svg?url=https%3A%2F%2Fgithub.com%2FRoyalSkye%2FOmni-VRP&count_bg=%233DC4C8&title_bg=%23555555&icon=github.svg&icon_color=%23E7E7E7&title=stats&edge_flat=false"/></a>&nbsp;&nbsp;&nbsp;&nbsp;<a href="https://github.com/RoyalSkye/Omni-VRP/blob/main/LICENSE"><img src="https://img.shields.io/badge/License-MIT-orange" alt="Paper"></a>
   </p>
 
 The PyTorch Implementation of *ICML 2023 Poster -- "Towards Omni-generalizable Neural Methods for Vehicle Routing Problems"* by [Jianan Zhou](https://royalskye.github.io), [Yaoxin Wu](https://research.tue.nl/en/persons/yaoxin-wu), [Wen Song](https://songwenas12.github.io), [Zhiguang Cao](https://zhiguangcaosg.github.io), [Jie Zhang](https://personal.ntu.edu.sg/zhangj).
@@ -103,4 +103,3 @@ booktitle   ={International Conference on Machine Learning},
 year        ={2023}
 }
 ```
-
