@@ -10,7 +10,11 @@ The PyTorch Implementation of *ICML 2023 Poster -- "Towards Omni-generalizable N
 
 ### TL;DR
 
-This paper studies a challenging yet realistic setting, which considers generalization across both size and distribution (a.k.a. omni-generalization) of neural methods in VRPs. Technically, a general meta-learning framework is developed to tackle it.
+This paper studies a challenging and realistic setting, which considers generalization across both size and distribution (a.k.a. omni-generalization) of neural methods in VRPs. Technically, a general meta-learning framework is developed to tackle it.
+
+<p align="center">
+  <img src="./imgs/ICML23_Sub16_Poster_4000x2667.png" width=95% alt="Poster"/>
+</p>
 
 ### Env Setup
 
@@ -35,6 +39,7 @@ nohup python -u train.py 2>&1 &
 meta_params['meta_method'] = "maml_fomaml"
 # c. first-order
 meta_params['meta_method'] = "fomaml"
+
 # 2. Testing
 # a. zero-shot on datasets (.pkl)
 nohup python -u test.py 2>&1 &
@@ -42,9 +47,16 @@ nohup python -u test.py 2>&1 &
 fine_tune_params['enable'] = True
 # c. zero-shot on benchmark instances (.tsp or .vrp)
 tester_params['test_set_path'] = "../../data/TSP/tsplib"
-# 3. Traditional VRP solvers ["concorde","lkh"] for TSP; ["hgs", "lkh"] for CVRP
+
+# 3. Traditional baselines (VRP solvers) ["concorde","lkh"] for TSP; ["hgs", "lkh"] for CVRP
 nohup python -u TSP_baseline.py --method "lkh" --cpus 32 --no_cuda --disable_cache 2>&1 &
-# 4. EAS
+
+# 4. Neural baselines
+# Note: For AMDKD-POMO, refer to: https://github.com/jieyibi/AMDKD
+meta_params['enable'] = False  # POMO
+meta_params['reptile'] = 'reptile'  # Meta-POMO
+
+# 5. Efficient active search (EAS)
 # Note: change -instances_path to the folder path if conducting EAS on benchmark instances
 # Note: Pls carefully check parameters, e.g., -norm, -round_distances, etc.
 nohup python -u run_search.py 2>&1 &
@@ -56,21 +68,25 @@ nohup python -u run_search.py 2>&1 &
 # Modify the default value in train.py
 # 1. Bootstrapped Meta-Learning - ICLR 2022
 meta_params['L'] = X (X > 0)
+
 # 2. ANIL (Almost No Inner Loop) - ICLR 2020
 model_params["meta_update_encoder"] = False
+
 # 3. Meta-training on the pretrained model
 # Note: The type of normalization layers should match (search for model_params["norm"])
 # Supported normalization layers: ["no", "batch", "batch_no_track", "instance", "rezero"]
 trainer_params['pretrain_load'] = True
+
 # 4. Resume meta-training 
 trainer_params['model_load'] = True
+
 # 5. No task scheduler
 meta_params['curriculum'] = False
-# 6. Baselines
-# Note: For AMDKD-POMO, refer to: https://github.com/jieyibi/AMDKD
-meta_params['enable'] = False  # POMO
-meta_params['reptile'] = 'reptile'  # Meta-POMO
 ```
+
+#### Pretrained
+
+For reference, we provide [pretrained](https://github.com/RoyalSkye/Omni-VRP/tree/main/pretrained) models on uniform instances following POMO, and meta-pretrained models on 32M instances. Some of them may be outdated. To fully reproduce the results, please retrain the model following the above commands.
 
 ### Discussions
 
