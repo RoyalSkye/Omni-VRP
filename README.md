@@ -54,7 +54,7 @@ nohup python -u TSP_baseline.py --method "lkh" --cpus 32 --no_cuda --disable_cac
 # 4. Neural baselines
 # Note: For AMDKD-POMO, refer to: https://github.com/jieyibi/AMDKD
 meta_params['enable'] = False  # POMO
-meta_params['reptile'] = 'reptile'  # Meta-POMO
+meta_params['meta_method'] = 'reptile'  # Meta-POMO
 
 # 5. Efficient active search (EAS)
 # Note: change -instances_path to the folder path if conducting EAS on benchmark instances
